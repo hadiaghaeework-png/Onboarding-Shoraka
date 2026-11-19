@@ -23,5 +23,6 @@
 node tests/auth-smoke.cjs
 node tests/security-smoke.cjs
 node tests/quiz-smoke.cjs
+node tests/path-performance.cjs
 ```
 این‌ها با سرویس‌های شبیه‌سازی‌شده‌اند و جای آزمایش واقعی Google را نمی‌گیرند. خروجی گزارش CSV با BOM و قابل باز شدن در Excel است، نه xlsx. محدودیت‌ها، تصمیم‌های کش، وضعیت آزمون‌ها و منبع لوگو در سند وضعیت ثبت شده‌اند.

@@ -648,6 +648,9 @@ function adminSaveAnnouncement(payload) {
   const user = getUserContext();
   requireRole_(user, ['admin']);
   if (!payload || !String(payload.title || '').trim()) throw new Error('عنوان اعلان الزامی است.');
+  const audience = String(payload.audience || 'all');
+  const valid = audience === 'all' || ['role:admin', 'role:learner'].indexOf(audience) !== -1 || TEAM_CONFIG.some(t => audience === 'team:' + t.key);
+  if (!valid || !String(payload.body || '').trim()) throw new Error('مخاطب یا متن اطلاعیه نامعتبر است.');
   const sh = sheet_('Announcements');
   const id = String(payload.id || '').trim();
   const row = [id || newId_('ANN'), String(payload.title).trim(), String(payload.body || '').trim(),

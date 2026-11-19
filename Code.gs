@@ -71,15 +71,15 @@ function getBootstrap() {
 
   // آزمون‌های در انتظار (آیتم‌های مسیر که آزمون دارند و هنوز قبول نشده‌اند)
   const progress = getMyProgressMap_(user.email);
-  const attempts = rows_('Attempts').filter(a => String(a.Email).toLowerCase() === user.email && truthy_(a.Passed));
+  const myAttempts = rows_('Attempts').filter(a => String(a.Email).toLowerCase() === user.email);
+  const attempts = myAttempts.filter(a => truthy_(a.Passed));
   const passedQuizzes = {};
   attempts.forEach(a => { passedQuizzes[String(a.QuizId)] = true; });
   let pendingQuizzes = 0;
-  myPaths.forEach(p => {
-    itemsOfPath_(p.pathId).forEach(i => {
-      const qid = String(i.QuizId || '');
-      if (qid && !passedQuizzes[qid] && !progress['item:' + String(i.ItemId)]) pendingQuizzes++;
-    });
+  const pathIds = new Set(myPaths.map(p => p.pathId));
+  rows_('PathItems').filter(i => pathIds.has(String(i.PathId)) && truthy_(i.Active)).forEach(i => {
+    const qid = String(i.QuizId || '');
+    if (qid && !passedQuizzes[qid] && !progress['item:' + String(i.ItemId)]) pendingQuizzes++;
   });
 
   // فعالیت‌های اخیر کاربر
@@ -103,7 +103,7 @@ function getBootstrap() {
       completedItems: agg.done,
       completionPercent: agg.total ? Math.round(agg.done / agg.total * 100) : 0,
       pendingQuizzes: pendingQuizzes,
-      totalAttempts: rows_('Attempts').filter(a => String(a.Email).toLowerCase() === user.email && String(a.Status) !== 'in_progress').length
+      totalAttempts: myAttempts.filter(a => String(a.Status) !== 'in_progress').length
     },
     activePaths: myPaths.filter(p => p.percent < 100).slice(0, 4),
     allPaths: myPaths,

@@ -59,8 +59,11 @@ function listMyPaths(teamKey) {
   if (teamKey) assertTeamAccess_(user, teamKey);
 
   const progress = getMyProgressMap_(user.email);
+  const allItems = rows_('PathItems').filter(i => truthy_(i.Active));
+  const itemsByPath = {};
+  allItems.forEach(i => { (itemsByPath[String(i.PathId)] || (itemsByPath[String(i.PathId)] = [])).push(i); });
   const paths = listPathsForTeams_(keys).map(p => {
-    const items = itemsOfPath_(p.PathId);
+    const items = itemsByPath[String(p.PathId)] || [];
     const prog = pathProgress_(items, progress);
     const team = teamConfigByKey_(p.TeamKey);
     return {
@@ -81,10 +84,14 @@ function getPath(pathId) {
   assertTeamAccess_(user, String(pathRow.TeamKey));
 
   const progress = getMyProgressMap_(user.email);
-  const quizRefs = getQuizRefMap_();
-  const items = itemsOfPath_(pathId).map(i => String(i.ItemId));
   const itemRows = rows_('PathItems').filter(i => String(i.PathId) === String(pathId) && truthy_(i.Active))
     .sort((a, b) => Number(a.Order || 0) - Number(b.Order || 0));
+  const ids = new Set(itemRows.map(i => String(i.QuizId || '')).filter(Boolean));
+  const passed = new Set(rows_('Attempts').filter(a => String(a.Email).toLowerCase() === user.email && truthy_(a.Passed)).map(a => String(a.QuizId)));
+  const quizzes = {};
+  rows_('Quizzes').filter(q => ids.has(String(q.QuizId)) && truthy_(q.Active)).forEach(q => { quizzes[String(q.QuizId)] = q; });
+  const counts = {};
+  if (ids.size) rows_('Questions').forEach(q => { const id = String(q.QuizId); if (ids.has(id)) counts[id] = (counts[id] || 0) + 1; });
 
   let blocked = false; // با عبور از یک آیتم اجباری انجام‌نشده، بقیه قفل می‌شوند
   const resolved = itemRows.map(item => {
@@ -93,7 +100,8 @@ function getPath(pathId) {
     const done = !!progress[key];
     const required = truthy_(item.Required);
     const quizId = String(item.QuizId || '');
-    const quizPassed = quizId ? hasPassedQuiz_(user.email, quizId) : true;
+    const quizPassed = !quizId || passed.has(quizId);
+    const q = quizzes[quizId];
     let status;
     if (done) status = 'completed';
     else if (blocked) status = 'locked';
@@ -104,7 +112,7 @@ function getPath(pathId) {
       itemId: id, order: Number(item.Order || 0), title: String(item.Title),
       driveItemId: String(item.DriveItemId || ''), itemType: String(item.ItemType || 'drive_file'),
       required: required, quizId: quizId,
-      quiz: quizId ? (getQuizMetaById_(quizId) || { available: true, quizId: quizId }) : null,
+      quiz: quizId ? (q ? { available: true, quizId: quizId, title: String(q.Title || ''), description: String(q.Description || ''), passScore: Number(q.PassScore) || 70, questionCount: counts[quizId] || 0, timeLimitMin: Number(q.TimeLimitMin) || 0, maxAttempts: Number(q.MaxAttempts) || 0 } : { available: false }) : null,
       estimatedMin: Number(item.EstimatedMin || 0),
       status: status, completedAt: progress[key] ? progress[key].completedAt : ''
     };

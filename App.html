@@ -189,6 +189,7 @@ const App = (() => {
     const firstName = String(u.name || u.email).split(' ')[0];
 
     let html = '';
+    if (b.drive && b.drive.error) html += '<div class="error-box" role="alert">خطا در اتصال Drive: ' + esc(b.drive.error) + '</div>';
     // هیرو
     html += '<section class="hero"><img class="hero-watermark" src="' + BRAND.mark + '" alt="" aria-hidden="true">'
       + '<div class="hero-content"><span class="hero-kicker">✦ مسیر یادگیری هوشمند</span>'

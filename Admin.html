@@ -15,7 +15,7 @@ window.Admin = (() => {
       tabs.push({ key: 'incomplete', label: 'تکمیل‌نشده‌ها' });
     }
 
-    if (u.role === 'admin') { tabs.push({ key: 'users', label: 'کاربران' }); tabs.push({ key: 'content', label: 'مسیرهای آموزشی' }); tabs.push({ key: 'quizzes', label: 'آزمون‌ها' }); tabs.push({ key: 'review', label: 'بازبینی آزمون' }); }
+    if (u.role === 'admin') { tabs.push({ key: 'users', label: 'کاربران' }); tabs.push({ key: 'content', label: 'مسیرهای آموزشی' }); tabs.push({ key: 'quizzes', label: 'آزمون‌ها' }); tabs.push({ key: 'review', label: 'بازبینی آزمون' }); tabs.push({ key: 'announcements', label: 'اطلاعیه‌ها' }); }
 
 
 
@@ -259,7 +259,22 @@ window.Admin = (() => {
     });
   }
 
-  const TAB_RENDERERS = { reports: renderReports, incomplete: renderIncomplete, users: renderUsers, content: renderContent, quizzes: window.AdminQuiz.render, review: window.AdminQuiz.review };
+  function renderAnnouncements(body, A) {
+    return A.callServer('adminListAnnouncements').then(r => {
+      const items = r.announcements || [];
+      body.innerHTML = '<div class="panel"><div class="section-head"><h3>اطلاعیه‌ها</h3><button class="btn btn-primary" id="addAnn">+ اطلاعیه جدید</button></div>' + (items.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>عنوان</th><th>مخاطب</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>'+items.map((a,i)=>'<tr><td>'+A.esc(a.title)+'</td><td>'+A.esc(a.audience)+'</td><td>'+(a.active?'فعال':'غیرفعال')+'</td><td><button class="btn btn-soft btn-sm" data-ann-edit="'+i+'">ویرایش</button> <button class="btn btn-danger btn-sm" data-ann-del="'+i+'">حذف</button></td></tr>').join('')+'</tbody></table></div>' : A.emptyHTML('🔔','اطلاعیه‌ای ثبت نشده است',''))+'</div>';
+      body.querySelector('#addAnn').onclick=()=>form(null);
+      body.querySelectorAll('[data-ann-edit]').forEach(b=>b.onclick=()=>form(items[+b.dataset.annEdit]));
+      body.querySelectorAll('[data-ann-del]').forEach(b=>b.onclick=()=>A.confirmModal({title:'حذف اطلاعیه',message:'این اطلاعیه حذف شود؟',danger:true,onConfirm:()=>A.callServer('adminDeleteAnnouncement',items[+b.dataset.annDel].id).then(()=>{A.state.bootstrap=null;A.toast('اطلاعیه حذف شد');renderAnnouncements(body,A)}).catch(e=>A.toast(e.message,'error'))}));
+      function form(a) {
+        a=a||{};
+        const audiences=[['all','همه'],['role:admin','مدیران'],['role:learner','کارشناسان']].concat((A.state.teams||[]).map(t=>['team:'+t.key,'تیم '+t.name]));
+        A.openModal({title:a.id?'ویرایش اطلاعیه':'اطلاعیه جدید',bodyHTML:'<form class="form-grid"><div class="form-field full"><label>عنوان</label><input name="title" required value="'+A.esc(a.title||'')+'"></div><div class="form-field full"><label>متن</label><textarea name="body" required>'+A.esc(a.body||'')+'</textarea></div><div class="form-field full"><label>مخاطب</label><select name="audience">'+audiences.map(x=>'<option value="'+A.esc(x[0])+'" '+((a.audience||'all')===x[0]?'selected':'')+'>'+A.esc(x[1])+'</option>').join('')+'</select></div><label class="check-row"><input type="checkbox" name="active" '+(a.active!==false?'checked':'')+'> فعال</label></form>',footHTML:'<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveAnn">ذخیره</button>',onMount:(m,f)=>{f.querySelector('#saveAnn').onclick=()=>{const form=m.querySelector('form');if(!form.reportValidity())return;const d=new FormData(form);A.callServer('adminSaveAnnouncement',{id:a.id||'',title:d.get('title'),body:d.get('body'),audience:d.get('audience'),active:form.elements.active.checked}).then(()=>{A.closeModal();A.state.bootstrap=null;A.toast('اطلاعیه ذخیره شد');renderAnnouncements(body,A)}).catch(e=>A.toast(e.message,'error'));};}});
+      }
+    });
+  }
+
+  const TAB_RENDERERS = { reports: renderReports, incomplete: renderIncomplete, users: renderUsers, content: renderContent, quizzes: window.AdminQuiz.render, review: window.AdminQuiz.review, announcements: renderAnnouncements };
   return { render: render };
 })();
 </script>
