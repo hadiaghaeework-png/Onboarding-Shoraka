@@ -5,7 +5,7 @@
 
 function normalizeRole_(role) {
   const r = String(role || '').toLowerCase().trim();
-  return r === 'admin' ? 'admin' : 'learner';
+  return ['admin', 'mentor', 'learner'].indexOf(r) !== -1 ? r : 'learner';
 }
 
 function roleLabel_(role) {
@@ -14,17 +14,20 @@ function roleLabel_(role) {
 
 // این متغیر فقط در اجرای apiRequest از نشست معتبر پر می‌شود.
 let CURRENT_SESSION_USERNAME_ = '';
+let CURRENT_USER_CONTEXT_ = null;
 
 function getUserContext() {
   const username = CURRENT_SESSION_USERNAME_;
   if (!username) throw new Error('نشست ورود معتبر نیست. دوباره وارد شوید.');
+  if (CURRENT_USER_CONTEXT_) return CURRENT_USER_CONTEXT_;
   const u = rows_('Users').find(x => String(x.Email).toLowerCase().trim() === username);
   if (!u || !truthy_(u.Active)) throw new Error('حساب شما غیرفعال است یا وجود ندارد.');
   const storedRole = String(u.Role || '').trim().toLowerCase();
-  if (['admin', 'learner'].indexOf(storedRole) === -1) throw new Error('نقش حساب نامعتبر است.');
+  if (['admin', 'mentor', 'learner'].indexOf(storedRole) === -1) throw new Error('نقش حساب نامعتبر است.');
   const role = normalizeRole_(storedRole), teams = splitCsv_(u.Teams);
   if (role === 'learner' && (teams.length !== 1 || !TEAM_CONFIG.some(t => t.key === teams[0]))) throw new Error('تیم این کارشناس باید دقیقاً یک تیم معتبر باشد.');
-  return {email: username, name: String(u.Name || username), role: role, roleLabel: roleLabel_(role), teams: teams, canManage: role === 'admin', mentorEmail: '', demo: false};
+  if (role === 'mentor' && (!teams.length || teams.some(t => !TEAM_CONFIG.some(x => x.key === t)))) throw new Error('تیم‌های منتور نامعتبر است.');
+  return CURRENT_USER_CONTEXT_ = {email: username, name: String(u.Name || username), role: role, roleLabel: roleLabel_(role), teams: teams, canManage: role === 'admin', mentorEmail: String(u.MentorEmail || '').toLowerCase(), demo: false};
 }
 
 // PBKDF2-HMAC-SHA256 with a unique per-user salt. Never store raw passwords in Sheets.
@@ -81,7 +84,12 @@ function login(username, password) {
   const dummy = Utilities.base64Encode(Utilities.newBlob('fixed-dummy-salt-for-login').getBytes());
   const actual = derivePassword_(password, cred ? String(cred.Salt) : dummy, cred ? Number(cred.Iterations) : 20000);
   if (!cred || !user || !truthy_(user.Active) || !constantEqual_(actual, String(cred.PasswordHash))) throw new Error('نام کاربری یا رمز عبور نادرست است.');
+  // لاگ ورود پیش از اعلام موفقیت به‌صورت همزمان در Sheet ذخیره می‌شود.
+  const auditLock = LockService.getScriptLock(); auditLock.waitLock(30000);
+  try { sheet_('Activity').appendRow([newId_('ACT'), nowIso_(), username, 'login', 'ورود موفق']); }
+  finally { auditLock.releaseLock(); }
   securityCacheRemove_(failKey);
+  cachePut_('presence:' + username, {at: nowIso_()}, 180);
   const token = newSecret_();
   securityCachePut_('session_' + token, {username: username, version: String(cred.Version), expires: Date.now() + 6*60*60*1000}, 21600);
   return ok_({token: token});
@@ -102,12 +110,12 @@ function apiRequest(token, operation, args) {
     adminPathItems, adminSavePathItem, adminDeletePathItem, adminDriveMeta, adminListQuizzes, adminGetQuiz, adminSaveQuiz,
     adminDeleteQuiz, adminSaveQuestion, adminDeleteQuestion, adminListAttempts, adminGetAttemptDetail, adminReviewAttempt,
     adminListAnnouncements, adminSaveAnnouncement, adminDeleteAnnouncement, reportSummary, reportTeamMembers, reportMember,
-    reportIncomplete, reportExportCsv, addMentorNote
+    reportIncomplete, reportExportCsv, addMentorNote, presencePing
   };
   if (!Object.prototype.hasOwnProperty.call(endpoints, operation) || !Array.isArray(args) || args.length > 10) throw new Error('درخواست نامعتبر است.');
   CURRENT_SESSION_USERNAME_ = session.username;
   try { getUserContext(); return endpoints[operation].apply(null, args); }
-  finally { CURRENT_SESSION_USERNAME_ = ''; }
+  finally { CURRENT_SESSION_USERNAME_ = ''; CURRENT_USER_CONTEXT_ = null; }
 }
 
 function requireRole_(user, roles) {
@@ -155,4 +163,11 @@ function isWithinTeam_(targetId, teamRootId) {
     if (String(current) === String(teamRootId)) return true;
   }
   return false;
+}
+
+/** نشان حضور تقریبی است و ذخیره دائمی فعالیت محسوب نمی‌شود. */
+function presencePing() {
+  const user = getUserContext();
+  cachePut_('presence:' + user.email, {at: nowIso_()}, 180);
+  return ok_({});
 }

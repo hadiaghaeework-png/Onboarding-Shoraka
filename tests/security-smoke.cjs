@@ -15,10 +15,10 @@ const sandbox = { rows_: name => data[name] || [], getUserContext:()=>user,
   markProgress_:()=>{}, console };
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync('Paths.gs','utf8')+'\n'+fs.readFileSync('Quizzes.gs','utf8'),sandbox);
-assert.throws(()=>sandbox.markItemComplete('a2'),/پیش‌نیاز/);
+assert.throws(()=>sandbox.markItemComplete('a2'),/ابتدا باید در آزمون/);
 assert.throws(()=>sandbox.getPath('p2'),/denied/);
 assert.throws(()=>sandbox.getQuizForAttempt('quiz2'),/دسترسی/);
-assert.throws(()=>sandbox.getQuizForAttempt('quiz1'),/پیش‌نیاز/);
+assert.doesNotThrow(()=>sandbox.assertQuizAccess_(user,data.Quizzes[0]));
 data.Progress.push({Email:user.email,PathItemId:'item:a1',Status:'completed'});
 assert.equal(sandbox.getPath('p1').items[1].status,'quiz_pending');
 assert.doesNotThrow(()=>sandbox.assertQuizAccess_(user,data.Quizzes[0]));

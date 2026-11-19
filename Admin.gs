@@ -8,10 +8,16 @@
 function adminListUsers() {
   const user = getUserContext();
   requireRole_(user, ['admin']);
-  const users = rows_('Users').map(u => ({
+  const userRows = rows_('Users');
+  const lastLogin = {};
+  rows_('Activity').filter(a => String(a.Action) === 'login').forEach(a => { const key = String(a.Email).toLowerCase(); if (!lastLogin[key] || new Date(a.Timestamp) > new Date(lastLogin[key])) lastLogin[key] = a.Timestamp; });
+  const presence = {};
+  try { const cache = CacheService.getScriptCache(); const keys = userRows.map(u => 'presence:' + String(u.Email).toLowerCase()); for (let i = 0; i < keys.length; i += 100) Object.assign(presence, cache.getAll(keys.slice(i, i + 100))); } catch (_) {}
+  const users = userRows.map(u => ({
     email: String(u.Email), name: String(u.Name || ''), role: normalizeRole_(u.Role),
     teams: splitCsv_(u.Teams), mentorEmail: String(u.MentorEmail || ''),
-    canManage: truthy_(u.CanManage), active: truthy_(u.Active), createdAt: u.CreatedAt
+    canManage: truthy_(u.CanManage), active: truthy_(u.Active), createdAt: u.CreatedAt,
+    lastLogin: lastLogin[String(u.Email).toLowerCase()] || '', online: !!presence['presence:' + String(u.Email).toLowerCase()]
   }));
   return ok_({ users: users, teams: TEAM_CONFIG.map(t => ({ key: t.key, name: t.name })) });
 }
@@ -23,12 +29,18 @@ function adminUpsertUser(payload) {
   const email = String(payload.email).toLowerCase().trim();
   if (!/^[a-z0-9._@-]{3,100}$/.test(email)) throw new Error('نام کاربری نامعتبر است.');
   if (payload.password && (typeof payload.password !== 'string' || payload.password.length < 12 || payload.password.length > 128)) throw new Error('رمز باید ۱۲ تا ۱۲۸ نویسه باشد.');
-  if (['admin', 'learner'].indexOf(String(payload.role)) === -1) throw new Error('نقش باید مدیر یا کارشناس باشد.');
+  if (['admin', 'mentor', 'learner'].indexOf(String(payload.role)) === -1) throw new Error('نقش باید مدیر، منتور یا کارشناس باشد.');
   const role = normalizeRole_(payload.role);
   if (email === user.email && role !== 'admin') throw new Error('نمی‌توانید نقش خودتان را تغییر دهید.');
   const teams = (payload.teams || []).filter(k => TEAM_CONFIG.some(t => t.key === k));
+  if (role === 'mentor' && (!teams.length || teams.length !== (payload.teams || []).length)) throw new Error('برای منتور حداقل یک تیم معتبر انتخاب کنید.');
   if (role === 'learner' && (teams.length !== 1 || (payload.teams || []).length !== 1)) throw new Error('برای هر کارشناس دقیقاً یک تیم معتبر انتخاب کنید.');
 
+  const mentorName = String(payload.mentorEmail || '').toLowerCase().trim();
+  if (mentorName) {
+    const mentor = rows_('Users').find(u => String(u.Email).toLowerCase().trim() === mentorName && String(u.Role).toLowerCase() === 'mentor' && truthy_(u.Active));
+    if (role !== 'learner' || !mentor || !splitCsv_(mentor.Teams).some(t => teams.indexOf(t) !== -1)) throw new Error('منتور فعال و هم‌تیم انتخاب کنید.');
+  }
   const sh = sheet_('Users');
   const values = sh.getDataRange().getValues();
   for (let i = 1; i < values.length; i++) {
@@ -621,7 +633,7 @@ function adminReviewAttempt_(attemptId, essayMarks, feedback) {
       if (!path || target.teams.indexOf(String(path.TeamKey)) === -1) return;
       const previous = itemsOfPath_(String(path.PathId));
       const index = previous.findIndex(x => String(x.ItemId) === String(it.ItemId));
-      if (index >= 0 && previous.slice(0, index).every(x => !truthy_(x.Required) || progress['item:' + String(x.ItemId)])) {
+      if (index >= 0) {
         markProgress_(target.email, 'item:' + String(it.ItemId), score);
         notifyPathCompletion_(target.email, String(path.PathId));
       }

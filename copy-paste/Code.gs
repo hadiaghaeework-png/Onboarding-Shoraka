@@ -169,7 +169,7 @@ function logActivity_(email, action, detail) {
 
 function normalizeRole_(role) {
   const r = String(role || '').toLowerCase().trim();
-  return r === 'admin' ? 'admin' : 'learner';
+  return ['admin', 'mentor', 'learner'].indexOf(r) !== -1 ? r : 'learner';
 }
 
 function roleLabel_(role) {
@@ -178,17 +178,20 @@ function roleLabel_(role) {
 
 // این متغیر فقط در اجرای apiRequest از نشست معتبر پر می‌شود.
 let CURRENT_SESSION_USERNAME_ = '';
+let CURRENT_USER_CONTEXT_ = null;
 
 function getUserContext() {
   const username = CURRENT_SESSION_USERNAME_;
   if (!username) throw new Error('نشست ورود معتبر نیست. دوباره وارد شوید.');
+  if (CURRENT_USER_CONTEXT_) return CURRENT_USER_CONTEXT_;
   const u = rows_('Users').find(x => String(x.Email).toLowerCase().trim() === username);
   if (!u || !truthy_(u.Active)) throw new Error('حساب شما غیرفعال است یا وجود ندارد.');
   const storedRole = String(u.Role || '').trim().toLowerCase();
-  if (['admin', 'learner'].indexOf(storedRole) === -1) throw new Error('نقش حساب نامعتبر است.');
+  if (['admin', 'mentor', 'learner'].indexOf(storedRole) === -1) throw new Error('نقش حساب نامعتبر است.');
   const role = normalizeRole_(storedRole), teams = splitCsv_(u.Teams);
   if (role === 'learner' && (teams.length !== 1 || !TEAM_CONFIG.some(t => t.key === teams[0]))) throw new Error('تیم این کارشناس باید دقیقاً یک تیم معتبر باشد.');
-  return {email: username, name: String(u.Name || username), role: role, roleLabel: roleLabel_(role), teams: teams, canManage: role === 'admin', mentorEmail: '', demo: false};
+  if (role === 'mentor' && (!teams.length || teams.some(t => !TEAM_CONFIG.some(x => x.key === t)))) throw new Error('تیم‌های منتور نامعتبر است.');
+  return CURRENT_USER_CONTEXT_ = {email: username, name: String(u.Name || username), role: role, roleLabel: roleLabel_(role), teams: teams, canManage: role === 'admin', mentorEmail: String(u.MentorEmail || '').toLowerCase(), demo: false};
 }
 
 // PBKDF2-HMAC-SHA256 with a unique per-user salt. Never store raw passwords in Sheets.
@@ -245,7 +248,12 @@ function login(username, password) {
   const dummy = Utilities.base64Encode(Utilities.newBlob('fixed-dummy-salt-for-login').getBytes());
   const actual = derivePassword_(password, cred ? String(cred.Salt) : dummy, cred ? Number(cred.Iterations) : 20000);
   if (!cred || !user || !truthy_(user.Active) || !constantEqual_(actual, String(cred.PasswordHash))) throw new Error('نام کاربری یا رمز عبور نادرست است.');
+  // لاگ ورود پیش از اعلام موفقیت به‌صورت همزمان در Sheet ذخیره می‌شود.
+  const auditLock = LockService.getScriptLock(); auditLock.waitLock(30000);
+  try { sheet_('Activity').appendRow([newId_('ACT'), nowIso_(), username, 'login', 'ورود موفق']); }
+  finally { auditLock.releaseLock(); }
   securityCacheRemove_(failKey);
+  cachePut_('presence:' + username, {at: nowIso_()}, 180);
   const token = newSecret_();
   securityCachePut_('session_' + token, {username: username, version: String(cred.Version), expires: Date.now() + 6*60*60*1000}, 21600);
   return ok_({token: token});
@@ -266,12 +274,12 @@ function apiRequest(token, operation, args) {
     adminPathItems, adminSavePathItem, adminDeletePathItem, adminDriveMeta, adminListQuizzes, adminGetQuiz, adminSaveQuiz,
     adminDeleteQuiz, adminSaveQuestion, adminDeleteQuestion, adminListAttempts, adminGetAttemptDetail, adminReviewAttempt,
     adminListAnnouncements, adminSaveAnnouncement, adminDeleteAnnouncement, reportSummary, reportTeamMembers, reportMember,
-    reportIncomplete, reportExportCsv, addMentorNote
+    reportIncomplete, reportExportCsv, addMentorNote, presencePing
   };
   if (!Object.prototype.hasOwnProperty.call(endpoints, operation) || !Array.isArray(args) || args.length > 10) throw new Error('درخواست نامعتبر است.');
   CURRENT_SESSION_USERNAME_ = session.username;
   try { getUserContext(); return endpoints[operation].apply(null, args); }
-  finally { CURRENT_SESSION_USERNAME_ = ''; }
+  finally { CURRENT_SESSION_USERNAME_ = ''; CURRENT_USER_CONTEXT_ = null; }
 }
 
 function requireRole_(user, roles) {
@@ -319,6 +327,13 @@ function isWithinTeam_(targetId, teamRootId) {
     if (String(current) === String(teamRootId)) return true;
   }
   return false;
+}
+
+/** نشان حضور تقریبی است و ذخیره دائمی فعالیت محسوب نمی‌شود. */
+function presencePing() {
+  const user = getUserContext();
+  cachePut_('presence:' + user.email, {at: nowIso_()}, 180);
+  return ok_({});
 }
 
 
@@ -584,7 +599,6 @@ function getPath(pathId) {
   const counts = {};
   if (ids.size) rows_('Questions').forEach(q => { const id = String(q.QuizId); if (ids.has(id)) counts[id] = (counts[id] || 0) + 1; });
 
-  let blocked = false; // با عبور از یک آیتم اجباری انجام‌نشده، بقیه قفل می‌شوند
   const resolved = itemRows.map(item => {
     const id = String(item.ItemId);
     const key = 'item:' + id;
@@ -595,10 +609,8 @@ function getPath(pathId) {
     const q = quizzes[quizId];
     let status;
     if (done) status = 'completed';
-    else if (blocked) status = 'locked';
     else if (quizId && !quizPassed) status = 'quiz_pending';
     else status = 'available';
-    if (required && !done) blocked = true;
     return {
       itemId: id, order: Number(item.Order || 0), title: String(item.Title),
       driveItemId: String(item.DriveItemId || ''), itemType: String(item.ItemType || 'drive_file'),
@@ -631,7 +643,7 @@ function markItemComplete(pathItemId) {
   if (!pathRow || !truthy_(pathRow.Active)) throw new Error('مسیر این آیتم پیدا نشد.');
   assertTeamAccess_(user, String(pathRow.TeamKey));
   const step = getPath(String(pathRow.PathId)).items.find(i => i.itemId === String(pathItemId));
-  if (!step || step.status === 'locked') throw new Error('پیش‌نیاز این مرحله تکمیل نشده است.');
+  if (!step) throw new Error('مرحله در این مسیر فعال نیست.');
 
   const quizId = String(item.QuizId || '');
   if (quizId && !hasPassedQuiz_(user.email, quizId)) {
@@ -716,9 +728,7 @@ function assertQuizAccess_(user, quiz) {
   for (const item of linked) {
     const path = paths.find(p => String(p.PathId) === String(item.PathId) && truthy_(p.Active));
     if (!path || allowedTeams_(user).indexOf(String(path.TeamKey)) === -1) continue;
-    const result = getPath(String(path.PathId));
-    const step = result.items.find(i => i.itemId === String(item.ItemId));
-    if (step && step.status !== 'locked') return;
+    return;
   }
   if (/^(drive|item)$/i.test(String(quiz.RefType || '')) && quiz.RefId) {
     const teams = findTeamFolders_(user);
@@ -727,7 +737,7 @@ function assertQuizAccess_(user, quiz) {
       if (!linked.length) return;
     }
   }
-  throw new Error('به این آزمون دسترسی ندارید یا پیش‌نیاز آن تکمیل نشده است.');
+  throw new Error('به این آزمون دسترسی ندارید.');
 }
 
 function getQuizForAttempt(quizId) {
@@ -1230,10 +1240,16 @@ function addMentorNote(menteeEmail, note) {
 function adminListUsers() {
   const user = getUserContext();
   requireRole_(user, ['admin']);
-  const users = rows_('Users').map(u => ({
+  const userRows = rows_('Users');
+  const lastLogin = {};
+  rows_('Activity').filter(a => String(a.Action) === 'login').forEach(a => { const key = String(a.Email).toLowerCase(); if (!lastLogin[key] || new Date(a.Timestamp) > new Date(lastLogin[key])) lastLogin[key] = a.Timestamp; });
+  const presence = {};
+  try { const cache = CacheService.getScriptCache(); const keys = userRows.map(u => 'presence:' + String(u.Email).toLowerCase()); for (let i = 0; i < keys.length; i += 100) Object.assign(presence, cache.getAll(keys.slice(i, i + 100))); } catch (_) {}
+  const users = userRows.map(u => ({
     email: String(u.Email), name: String(u.Name || ''), role: normalizeRole_(u.Role),
     teams: splitCsv_(u.Teams), mentorEmail: String(u.MentorEmail || ''),
-    canManage: truthy_(u.CanManage), active: truthy_(u.Active), createdAt: u.CreatedAt
+    canManage: truthy_(u.CanManage), active: truthy_(u.Active), createdAt: u.CreatedAt,
+    lastLogin: lastLogin[String(u.Email).toLowerCase()] || '', online: !!presence['presence:' + String(u.Email).toLowerCase()]
   }));
   return ok_({ users: users, teams: TEAM_CONFIG.map(t => ({ key: t.key, name: t.name })) });
 }
@@ -1245,12 +1261,18 @@ function adminUpsertUser(payload) {
   const email = String(payload.email).toLowerCase().trim();
   if (!/^[a-z0-9._@-]{3,100}$/.test(email)) throw new Error('نام کاربری نامعتبر است.');
   if (payload.password && (typeof payload.password !== 'string' || payload.password.length < 12 || payload.password.length > 128)) throw new Error('رمز باید ۱۲ تا ۱۲۸ نویسه باشد.');
-  if (['admin', 'learner'].indexOf(String(payload.role)) === -1) throw new Error('نقش باید مدیر یا کارشناس باشد.');
+  if (['admin', 'mentor', 'learner'].indexOf(String(payload.role)) === -1) throw new Error('نقش باید مدیر، منتور یا کارشناس باشد.');
   const role = normalizeRole_(payload.role);
   if (email === user.email && role !== 'admin') throw new Error('نمی‌توانید نقش خودتان را تغییر دهید.');
   const teams = (payload.teams || []).filter(k => TEAM_CONFIG.some(t => t.key === k));
+  if (role === 'mentor' && (!teams.length || teams.length !== (payload.teams || []).length)) throw new Error('برای منتور حداقل یک تیم معتبر انتخاب کنید.');
   if (role === 'learner' && (teams.length !== 1 || (payload.teams || []).length !== 1)) throw new Error('برای هر کارشناس دقیقاً یک تیم معتبر انتخاب کنید.');
 
+  const mentorName = String(payload.mentorEmail || '').toLowerCase().trim();
+  if (mentorName) {
+    const mentor = rows_('Users').find(u => String(u.Email).toLowerCase().trim() === mentorName && String(u.Role).toLowerCase() === 'mentor' && truthy_(u.Active));
+    if (role !== 'learner' || !mentor || !splitCsv_(mentor.Teams).some(t => teams.indexOf(t) !== -1)) throw new Error('منتور فعال و هم‌تیم انتخاب کنید.');
+  }
   const sh = sheet_('Users');
   const values = sh.getDataRange().getValues();
   for (let i = 1; i < values.length; i++) {
@@ -1843,7 +1865,7 @@ function adminReviewAttempt_(attemptId, essayMarks, feedback) {
       if (!path || target.teams.indexOf(String(path.TeamKey)) === -1) return;
       const previous = itemsOfPath_(String(path.PathId));
       const index = previous.findIndex(x => String(x.ItemId) === String(it.ItemId));
-      if (index >= 0 && previous.slice(0, index).every(x => !truthy_(x.Required) || progress['item:' + String(x.ItemId)])) {
+      if (index >= 0) {
         markProgress_(target.email, 'item:' + String(it.ItemId), score);
         notifyPathCompletion_(target.email, String(path.PathId));
       }

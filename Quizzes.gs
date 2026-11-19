@@ -69,9 +69,7 @@ function assertQuizAccess_(user, quiz) {
   for (const item of linked) {
     const path = paths.find(p => String(p.PathId) === String(item.PathId) && truthy_(p.Active));
     if (!path || allowedTeams_(user).indexOf(String(path.TeamKey)) === -1) continue;
-    const result = getPath(String(path.PathId));
-    const step = result.items.find(i => i.itemId === String(item.ItemId));
-    if (step && step.status !== 'locked') return;
+    return;
   }
   if (/^(drive|item)$/i.test(String(quiz.RefType || '')) && quiz.RefId) {
     const teams = findTeamFolders_(user);
@@ -80,7 +78,7 @@ function assertQuizAccess_(user, quiz) {
       if (!linked.length) return;
     }
   }
-  throw new Error('به این آزمون دسترسی ندارید یا پیش‌نیاز آن تکمیل نشده است.');
+  throw new Error('به این آزمون دسترسی ندارید.');
 }
 
 function getQuizForAttempt(quizId) {

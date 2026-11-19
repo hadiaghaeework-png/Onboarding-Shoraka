@@ -1011,7 +1011,7 @@ const App = (() => {
     $('#loginScreen').hidden = true; $('#appRoot').hidden = false;
     go('dashboard');
     loadNotifications(true).catch(err => toast(err.message, 'error'));
-    if (!notificationPoll) notificationPoll = setInterval(() => { if (state.sessionToken) loadNotifications(true).catch(() => {}); }, 60000);
+    if (!notificationPoll) notificationPoll = setInterval(() => { if (state.sessionToken) { loadNotifications(true).catch(() => {}); callServer('presencePing').catch(() => {}); } }, 60000);
   }
   async function boot() {
     let saved = null;

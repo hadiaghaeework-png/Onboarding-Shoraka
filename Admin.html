@@ -171,8 +171,8 @@ window.Admin = (() => {
 
       body.innerHTML = '<div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>مدیریت کاربران <span class="tab-count">' + A.fmtNum(users.length) + '</span></h3>'
         + '<div style="display:flex;gap:8px"><input class="filter" id="userSearch" placeholder="جست‌وجو در نام/نام کاربری…"><button class="btn btn-primary btn-sm" id="addUserBtn">+ افزودن کاربر</button></div></div>'
-        + '<div class="table-wrap"><table class="data" id="usersTable"><thead><tr><th>نام</th><th>نام کاربری</th><th>نقش</th><th>تیم‌ها</th><th>منتور</th><th>مدیریت محتوا</th><th>وضعیت</th><th></th></tr></thead><tbody>'
-        + users.map(u => '<tr data-email="' + A.esc(u.email) + '" data-search="' + A.esc((u.name + ' ' + u.email).toLowerCase()) + '"><td><strong>' + A.esc(u.name || '—') + '</strong></td><td class="hint">' + A.esc(u.email) + '</td><td>' + A.esc(roleLabel(u.role)) + '</td><td>' + A.esc(splitTeams(u.teams).map(teamName).join('، ')) + '</td><td class="hint">' + A.esc(u.mentorEmail || '—') + '</td><td>' + (u.canManage ? '✓' : '—') + '</td><td>' + (u.active ? '<span class="tag tag-ok">فعال</span>' : '<span class="tag tag-danger">غیرفعال</span>') + '</td><td style="white-space:nowrap"><button class="btn btn-soft btn-sm" data-edit>ویرایش</button> <button class="btn ' + (u.active ? 'btn-danger' : 'btn-ok') + ' btn-sm" data-toggle>' + (u.active ? 'غیرفعال' : 'فعال') + '</button></td></tr>').join('')
+        + '<div class="table-wrap"><table class="data" id="usersTable"><thead><tr><th>نام</th><th>نام کاربری</th><th>نقش</th><th>تیم‌ها</th><th>منتور</th><th>وضعیت حساب</th><th>آخرین ورود</th><th>حضور تقریبی</th><th></th></tr></thead><tbody>'
+        + users.map(u => '<tr data-email="' + A.esc(u.email) + '" data-search="' + A.esc((u.name + ' ' + u.email).toLowerCase()) + '"><td><strong>' + A.esc(u.name || '—') + '</strong></td><td class="hint">' + A.esc(u.email) + '</td><td>' + A.esc(roleLabel(u.role)) + '</td><td>' + A.esc(splitTeams(u.teams).map(teamName).join('، ')) + '</td><td class="hint">' + A.esc(u.mentorEmail || '—') + '</td><td>' + (u.active ? '<span class="tag tag-ok">فعال</span>' : '<span class="tag tag-danger">غیرفعال</span>') + '</td><td>' + A.fmtDateTime(u.lastLogin) + '</td><td>' + (u.online ? 'فعال اخیراً' : u.lastLogin ? 'آفلاین / نامشخص' : 'هنوز وارد نشده') + '</td><td style="white-space:nowrap"><button class="btn btn-soft btn-sm" data-edit>ویرایش</button> <button class="btn ' + (u.active ? 'btn-danger' : 'btn-ok') + ' btn-sm" data-toggle>' + (u.active ? 'غیرفعال' : 'فعال') + '</button></td></tr>').join('')
         + '</tbody></table></div></div>';
 
       const search = body.querySelector('#userSearch');
@@ -180,10 +180,10 @@ window.Admin = (() => {
         const q = search.value.trim().toLowerCase();
         body.querySelectorAll('#usersTable tbody tr').forEach(tr => { tr.style.display = !q || tr.getAttribute('data-search').includes(q) ? '' : 'none'; });
       });
-      body.querySelector('#addUserBtn').addEventListener('click', () => openUserModal(A, null, teams, () => renderUsers(body, A)));
+      body.querySelector('#addUserBtn').addEventListener('click', () => openUserModal(A, null, teams, users, () => renderUsers(body, A)));
       body.querySelectorAll('[data-edit]').forEach(btn => btn.addEventListener('click', () => {
         const email = btn.closest('tr').getAttribute('data-email');
-        openUserModal(A, users.find(u => u.email === email), teams, () => renderUsers(body, A));
+        openUserModal(A, users.find(u => u.email === email), teams, users, () => renderUsers(body, A));
       }));
       body.querySelectorAll('[data-toggle]').forEach(btn => btn.addEventListener('click', () => {
         const email = btn.closest('tr').getAttribute('data-email');
@@ -195,10 +195,10 @@ window.Admin = (() => {
     });
   }
 
-  function openUserModal(A, user, teams, onSaved) {
+  function openUserModal(A, user, teams, users, onSaved) {
     user = user || {};
     const isEdit = !!user.email;
-    const teamChecks = teams.map(t => '<label class="check-row"><input type="radio" name="teams" value="' + A.esc(t.key) + '"' + (splitTeams(user.teams).includes(t.key) ? ' checked' : '') + '> تیم ' + A.esc(t.name) + '</label>').join('');
+    const teamChecks = teams.map(t => '<label class="check-row"><input type="checkbox" name="teams" value="' + A.esc(t.key) + '"' + (splitTeams(user.teams).includes(t.key) ? ' checked' : '') + '> تیم ' + A.esc(t.name) + '</label>').join('');
     A.openModal({
       title: isEdit ? 'ویرایش کاربر' : 'افزودن کاربر',
       footHTML: '<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveUserBtn">ذخیره</button>',
@@ -207,9 +207,10 @@ window.Admin = (() => {
         + '<div class="form-field full"><label>رمز عبور '+(isEdit?'(برای حفظ رمز فعلی خالی بگذارید)':'*')+'</label><input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" '+(isEdit?'':'required')+'></div>'
         + '<div class="form-field full"><label>نام و نام خانوادگی</label><input name="name" value="' + A.esc(user.name || '') + '" placeholder="علی رضایی"></div>'
         + '<div class="form-field"><label>نقش *</label><select name="role">'
-        + [['learner', 'کارشناس'], ['admin', 'مدیر سامانه']].map(o => '<option value="' + o[0] + '"' + (user.role === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
+        + [['learner', 'کارشناس'], ['mentor', 'منتور'], ['admin', 'مدیر سامانه']].map(o => '<option value="' + o[0] + '"' + (user.role === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
         + '</select></div>'
-        + '<div class="form-field full"><label>تیم کارشناس (فقط یک تیم)</label><div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 0">' + teamChecks + '</div></div>'
+        + '<div class="form-field full"><label>منتور کارشناس</label><select name="mentorEmail"><option value="">بدون منتور</option>' + users.filter(u => u.role === 'mentor' && u.active).map(u => '<option value="' + A.esc(u.email) + '"' + (user.mentorEmail === u.email ? ' selected' : '') + '>' + A.esc(u.name || u.email) + ' — ' + A.esc(u.email) + '</option>').join('') + '</select></div>'
+        + '<div class="form-field full"><label>تیم‌ها (کارشناس: یک تیم؛ منتور: یک یا چند تیم)</label><div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 0">' + teamChecks + '</div></div>'
         + '</form>',
       onMount: (bodyEl, foot) => {
         foot.querySelector('#saveUserBtn').addEventListener('click', () => {
@@ -219,7 +220,7 @@ window.Admin = (() => {
           const payload = {
             email: fd.get('email'), password: fd.get('password') || '', name: fd.get('name'), role: fd.get('role'),
             teams: Array.from(form.querySelectorAll('input[name="teams"]:checked')).map(x => x.value),
-            mentorEmail: '', canManage: fd.get('role') === 'admin'
+            mentorEmail: fd.get('role') === 'learner' ? (fd.get('mentorEmail') || '') : '', canManage: fd.get('role') === 'admin'
           };
           A.callServer('adminUpsertUser', payload).then(() => { A.closeModal(); A.toast('کاربر ذخیره شد'); onSaved(); }).catch(e => A.toast(e.message, 'error'));
         });

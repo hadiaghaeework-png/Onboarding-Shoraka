@@ -93,7 +93,6 @@ function getPath(pathId) {
   const counts = {};
   if (ids.size) rows_('Questions').forEach(q => { const id = String(q.QuizId); if (ids.has(id)) counts[id] = (counts[id] || 0) + 1; });
 
-  let blocked = false; // با عبور از یک آیتم اجباری انجام‌نشده، بقیه قفل می‌شوند
   const resolved = itemRows.map(item => {
     const id = String(item.ItemId);
     const key = 'item:' + id;
@@ -104,10 +103,8 @@ function getPath(pathId) {
     const q = quizzes[quizId];
     let status;
     if (done) status = 'completed';
-    else if (blocked) status = 'locked';
     else if (quizId && !quizPassed) status = 'quiz_pending';
     else status = 'available';
-    if (required && !done) blocked = true;
     return {
       itemId: id, order: Number(item.Order || 0), title: String(item.Title),
       driveItemId: String(item.DriveItemId || ''), itemType: String(item.ItemType || 'drive_file'),
@@ -140,7 +137,7 @@ function markItemComplete(pathItemId) {
   if (!pathRow || !truthy_(pathRow.Active)) throw new Error('مسیر این آیتم پیدا نشد.');
   assertTeamAccess_(user, String(pathRow.TeamKey));
   const step = getPath(String(pathRow.PathId)).items.find(i => i.itemId === String(pathItemId));
-  if (!step || step.status === 'locked') throw new Error('پیش‌نیاز این مرحله تکمیل نشده است.');
+  if (!step) throw new Error('مرحله در این مسیر فعال نیست.');
 
   const quizId = String(item.QuizId || '');
   if (quizId && !hasPassedQuiz_(user.email, quizId)) {
