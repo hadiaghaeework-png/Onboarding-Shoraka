@@ -126,6 +126,7 @@ function getBootstrap() {
     recommended: myPaths.filter(p => p.done === 0 && p.total > 0).slice(0, 3),
     recentActivity: recent,
     announcements: ann,
+    notifications: listNotifications().notifications,
     pageSize: CONFIG.PAGE_SIZE,
     roleLabels: ROLE_LABELS
   });

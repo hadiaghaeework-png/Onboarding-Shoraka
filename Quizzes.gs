@@ -63,6 +63,7 @@ function shuffle_(arr) {
  */
 // آزمون تنها از مسیر فعال و قابل دسترس یا از یک آیتم Drive مجاز قابل اجراست.
 function assertQuizAccess_(user, quiz) {
+  if (quiz.TeamKey) assertTeamAccess_(user, String(quiz.TeamKey));
   const paths = rows_('Paths');
   const linked = rows_('PathItems').filter(i => String(i.QuizId || '') === String(quiz.QuizId) && truthy_(i.Active));
   for (const item of linked) {
@@ -220,7 +221,7 @@ function submitQuiz_(quizId, answers, timeSpentSec, attemptToken) {
       const path = rows_('Paths').find(p => String(p.PathId) === String(it.PathId) && truthy_(p.Active));
       if (!path || allowedTeams_(user).indexOf(String(path.TeamKey)) === -1) return;
       const step = getPath(String(path.PathId)).items.find(i => i.itemId === String(it.ItemId));
-      if (step && step.status !== 'locked') markProgress_(user.email, 'item:' + String(it.ItemId), provisionalScore);
+      if (step && step.status !== 'locked') { markProgress_(user.email, 'item:' + String(it.ItemId), provisionalScore); notifyPathCompletion_(user.email, String(path.PathId)); }
     });
   }
   logActivity_(user.email, 'quiz_submit', String(q.Title) + ' — ' + provisionalScore + '٪');

@@ -26,12 +26,14 @@ const SHEET_DEFS = {
   Paths:        ['PathId', 'TeamKey', 'Title', 'Description', 'Order', 'Active', 'CreatedAt'],
   PathItems:    ['ItemId', 'PathId', 'Order', 'Title', 'DriveItemId', 'ItemType', 'Required', 'QuizId', 'EstimatedMin', 'Active'],
   Progress:     ['Email', 'PathItemId', 'Status', 'CompletedAt', 'Score'],
-  Quizzes:      ['QuizId', 'RefType', 'RefId', 'Title', 'Description', 'PassScore', 'TimeLimitMin', 'MaxAttempts', 'ShuffleQuestions', 'ShuffleOptions', 'ShowAnswers', 'Active', 'CreatedAt'],
+  Quizzes:      ['QuizId', 'RefType', 'RefId', 'Title', 'Description', 'PassScore', 'TimeLimitMin', 'MaxAttempts', 'ShuffleQuestions', 'ShuffleOptions', 'ShowAnswers', 'Active', 'CreatedAt', 'TeamKey'],
   Questions:    ['QuestionId', 'QuizId', 'Order', 'Type', 'Text', 'OptionsJSON', 'CorrectJSON', 'Points'],
   Attempts:     ['AttemptId', 'Timestamp', 'Email', 'QuizId', 'Score', 'Passed', 'Status', 'AnswersJSON', 'Feedback', 'TimeSpentSec'],
   Announcements:['Id', 'Title', 'Body', 'Audience', 'Active', 'CreatedAt'],
   Activity:     ['Id', 'Timestamp', 'Email', 'Action', 'Detail'],
-  MentorNotes:  ['Id', 'Timestamp', 'MentorEmail', 'MenteeEmail', 'Note']
+  MentorNotes:  ['Id', 'Timestamp', 'MentorEmail', 'MenteeEmail', 'Note'],
+  Notifications:['Id', 'Email', 'Title', 'Body', 'CreatedAt', 'PathId'],
+  NotificationReads:['Email', 'NotificationId', 'ReadAt']
 };
 
 const ROLE_LABELS = {
@@ -192,8 +194,10 @@ function getUserContext() {
     const storedRole = String(u.Role || '').trim().toLowerCase();
     if (['admin', 'learner'].indexOf(storedRole) === -1) throw new Error('نقش حساب نامعتبر است؛ با مدیر سامانه تماس بگیرید.');
     const role = normalizeRole_(storedRole);
+    const teams = splitCsv_(u.Teams);
+    if (role === 'learner' && (teams.length !== 1 || !TEAM_CONFIG.some(t => t.key === teams[0]))) throw new Error('تیم این کارشناس باید دقیقاً یک تیم معتبر باشد؛ با مدیر سامانه تماس بگیرید.');
     return { email: email, name: String(u.Name || email), role: role,
-      roleLabel: roleLabel_(role), teams: splitCsv_(u.Teams),
+      roleLabel: roleLabel_(role), teams: teams,
       canManage: role === 'admin', mentorEmail: '', demo: false };
   }
 
@@ -564,6 +568,7 @@ function markItemComplete(pathItemId) {
     throw new Error('برای تکمیل این مرحله ابتدا باید در آزمون متصل قبول شوید.');
   }
   markProgress_(user.email, 'item:' + pathItemId, 100);
+  notifyPathCompletion_(user.email, String(pathRow.PathId));
   logActivity_(user.email, 'path_item_complete', String(item.Title));
   return ok_({});
 }
@@ -635,6 +640,7 @@ function shuffle_(arr) {
  */
 // آزمون تنها از مسیر فعال و قابل دسترس یا از یک آیتم Drive مجاز قابل اجراست.
 function assertQuizAccess_(user, quiz) {
+  if (quiz.TeamKey) assertTeamAccess_(user, String(quiz.TeamKey));
   const paths = rows_('Paths');
   const linked = rows_('PathItems').filter(i => String(i.QuizId || '') === String(quiz.QuizId) && truthy_(i.Active));
   for (const item of linked) {
@@ -792,7 +798,7 @@ function submitQuiz_(quizId, answers, timeSpentSec, attemptToken) {
       const path = rows_('Paths').find(p => String(p.PathId) === String(it.PathId) && truthy_(p.Active));
       if (!path || allowedTeams_(user).indexOf(String(path.TeamKey)) === -1) return;
       const step = getPath(String(path.PathId)).items.find(i => i.itemId === String(it.ItemId));
-      if (step && step.status !== 'locked') markProgress_(user.email, 'item:' + String(it.ItemId), provisionalScore);
+      if (step && step.status !== 'locked') { markProgress_(user.email, 'item:' + String(it.ItemId), provisionalScore); notifyPathCompletion_(user.email, String(path.PathId)); }
     });
   }
   logActivity_(user.email, 'quiz_submit', String(q.Title) + ' — ' + provisionalScore + '٪');
@@ -1172,7 +1178,7 @@ function adminUpsertUser(payload) {
   const role = normalizeRole_(payload.role);
   if (email === user.email && role !== 'admin') throw new Error('نمی‌توانید نقش خودتان را تغییر دهید.');
   const teams = (payload.teams || []).filter(k => TEAM_CONFIG.some(t => t.key === k));
-  if (role !== 'admin' && teams.length === 0) throw new Error('حداقل یک تیم برای کاربر انتخاب کنید.');
+  if (role === 'learner' && (teams.length !== 1 || (payload.teams || []).length !== 1)) throw new Error('برای هر کارشناس دقیقاً یک تیم معتبر انتخاب کنید.');
 
   const sh = sheet_('Users');
   const values = sh.getDataRange().getValues();
@@ -1250,7 +1256,7 @@ function adminListPaths(teamKey) {
       description: String(p.Description || ''), order: Number(p.Order || 0), active: truthy_(p.Active),
       itemCount: items.filter(i => String(i.PathId) === String(p.PathId) && truthy_(i.Active)).length
     }));
-  const quizzes = rows_('Quizzes').map(q => ({ quizId: String(q.QuizId), title: String(q.Title) }));
+  const quizzes = adminListQuizzes().quizzes;
   return ok_({ paths: paths, teams: TEAM_CONFIG.filter(t => allowed.indexOf(t.key) !== -1), quizzes: quizzes });
 }
 
@@ -1307,6 +1313,12 @@ function adminSavePathItem(payload) {
 
   const driveId = parseDriveId_(payload.driveItemId);
   const quizId = String(payload.quizId || '').trim();
+  if (quizId) {
+    const quiz = getQuizRow_(quizId);
+    if (!quiz || !truthy_(quiz.Active) || (quiz.TeamKey && String(quiz.TeamKey) !== String(pathRow.TeamKey))) throw new Error('آزمون فعال این تیم نیست.');
+    const linkedPaths = rows_('PathItems').filter(i => String(i.QuizId || '') === quizId).map(i => String(i.PathId));
+    if (rows_('Paths').some(p => linkedPaths.indexOf(String(p.PathId)) !== -1 && String(p.TeamKey) !== String(pathRow.TeamKey))) throw new Error('این آزمون به تیم دیگری متصل است.');
+  }
   if (driveId) {
     const team = getTeamFolderOrThrow_(user, String(pathRow.TeamKey));
     if (!isWithinTeam_(driveId, team.id)) throw new Error('فایل باید داخل پوشه همین تیم باشد.');
@@ -1407,6 +1419,8 @@ function adminListQuizzes() {
   // نگاشت آزمون ← تیم (از طریق آیتم‌های مسیر متصل به آزمون)
   const pathTeam = {};
   rows_('Paths').forEach(p => { pathTeam[String(p.PathId)] = String(p.TeamKey); });
+  const linkedQuizTeams = {};
+  rows_('PathItems').forEach(i => { const id = String(i.QuizId || ''), team = pathTeam[String(i.PathId)]; if (id && team) (linkedQuizTeams[id] || (linkedQuizTeams[id] = new Set())).add(team); });
   const allowedQuizzes = new Set();
   if (user.role === 'admin') {
     rows_('Quizzes').forEach(q => allowedQuizzes.add(String(q.QuizId)));
@@ -1423,7 +1437,7 @@ function adminListQuizzes() {
     .filter(q => allowedQuizzes.has(String(q.QuizId)))
     .sort((a, b) => new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0))
     .map(q => ({
-      quizId: String(q.QuizId), refType: String(q.RefType || 'standalone'), refId: String(q.RefId || ''),
+      quizId: String(q.QuizId), teamKey: String(q.TeamKey || ((linkedQuizTeams[String(q.QuizId)] && linkedQuizTeams[String(q.QuizId)].size === 1) ? Array.from(linkedQuizTeams[String(q.QuizId)])[0] : '')), refType: String(q.RefType || 'standalone'), refId: String(q.RefId || ''),
       title: String(q.Title), description: String(q.Description || ''),
       passScore: Number(q.PassScore) || 70, timeLimitMin: Number(q.TimeLimitMin) || 0,
       maxAttempts: Number(q.MaxAttempts) || 0, shuffleQuestions: truthy_(q.ShuffleQuestions),
@@ -1446,7 +1460,7 @@ function adminGetQuiz(quizId) {
   }));
   return ok_({
     quiz: {
-      quizId: String(q.QuizId), refType: String(q.RefType || 'standalone'), refId: String(q.RefId || ''),
+      quizId: String(q.QuizId), teamKey: String(q.TeamKey || ''), refType: String(q.RefType || 'standalone'), refId: String(q.RefId || ''),
       title: String(q.Title), description: String(q.Description || ''),
       passScore: Number(q.PassScore) || 70, timeLimitMin: Number(q.TimeLimitMin) || 0,
       maxAttempts: Number(q.MaxAttempts) || 0, shuffleQuestions: truthy_(q.ShuffleQuestions),
@@ -1485,12 +1499,14 @@ function adminSaveQuiz(payload) {
   const user = getUserContext();
   requireRole_(user, ['admin', 'team_manager']);
   if (!payload || !String(payload.title || '').trim()) throw new Error('عنوان آزمون الزامی است.');
+  const teamKey = String(payload.teamKey || '');
+  if (!TEAM_CONFIG.some(t => t.key === teamKey) || !canManageTeam_(user, teamKey)) throw new Error('تیم آزمون معتبر نیست.');
   const pass = Number(payload.passScore), minutes = Number(payload.timeLimitMin || 0), attempts = Number(payload.maxAttempts || 0);
   if (!Number.isFinite(pass) || pass < 1 || pass > 100 || !Number.isInteger(minutes) || minutes < 0 || minutes > 350 || !Number.isInteger(attempts) || attempts < 0) throw new Error('تنظیمات نمره، زمان یا تعداد تلاش نامعتبر است.');
   if (['always', 'after_pass', 'never'].indexOf(String(payload.showAnswers || 'after_pass')) === -1) throw new Error('تنظیم نمایش پاسخ نامعتبر است.');
   if (payload.refId) {
     const id = parseDriveId_(payload.refId);
-    if (!findTeamFolders_(user).some(t => canManageTeam_(user, t.key) && isWithinTeam_(id, t.id))) throw new Error('فایل آزمون باید در پوشه یک تیم مجاز باشد.');
+    if (!findTeamFolders_(user).some(t => t.key === teamKey && canManageTeam_(user, t.key) && isWithinTeam_(id, t.id))) throw new Error('فایل آزمون باید در پوشه یک تیم مجاز باشد.');
     payload.refId = id;
   }
 
@@ -1502,12 +1518,14 @@ function adminSaveQuiz(payload) {
     String(payload.title).trim(), String(payload.description || '').trim(),
     Number(payload.passScore) || 70, Number(payload.timeLimitMin) || 0, Number(payload.maxAttempts) || 0,
     !!payload.shuffleQuestions, !!payload.shuffleOptions,
-    String(payload.showAnswers || 'after_pass'), payload.active !== false, nowIso_()
+    String(payload.showAnswers || 'after_pass'), payload.active !== false, nowIso_(), teamKey
   ];
   if (id) {
     const existing = getQuizRow_(id);
     if (!existing) throw new Error('آزمون پیدا نشد.');
     assertQuizManageScope_(user, existing);
+    const linkedPathIds = rows_('PathItems').filter(i => String(i.QuizId || '') === id).map(i => String(i.PathId));
+    if (rows_('Paths').some(p => linkedPathIds.indexOf(String(p.PathId)) !== -1 && String(p.TeamKey) !== teamKey)) throw new Error('این آزمون به مسیر تیم دیگری متصل است.');
     if (rows_('Attempts').some(a => String(a.QuizId) === id)) throw new Error('پس از ثبت تلاش، ویرایش تنظیمات آزمون مجاز نیست؛ آزمون جدید بسازید.');
     const values = sh.getDataRange().getValues();
     for (let i = 1; i < values.length; i++) {
@@ -1753,6 +1771,7 @@ function adminReviewAttempt_(attemptId, essayMarks, feedback) {
       const index = previous.findIndex(x => String(x.ItemId) === String(it.ItemId));
       if (index >= 0 && previous.slice(0, index).every(x => !truthy_(x.Required) || progress['item:' + String(x.ItemId)])) {
         markProgress_(target.email, 'item:' + String(it.ItemId), score);
+        notifyPathCompletion_(target.email, String(path.PathId));
       }
     });
   }
@@ -1822,6 +1841,38 @@ function adminDeleteAnnouncement(id) {
     if (String(values[i][0]) === String(id)) { sh.deleteRow(i + 1); return ok_({}); }
   }
   throw new Error('اعلان پیدا نشد.');
+}
+
+/** اعلان‌های عمومی مجاز و اعلان‌های اختصاصی کاربر، همراه وضعیت خواندن. */
+function listNotifications() {
+  const user = getUserContext();
+  const seen = new Set(rows_('NotificationReads').filter(r => String(r.Email).toLowerCase() === user.email).map(r => String(r.NotificationId)));
+  const publicItems = rows_('Announcements').filter(a => announcementVisible_(a, user)).map(a => ({ id: 'ann:' + String(a.Id), title: String(a.Title), body: String(a.Body), createdAt: a.CreatedAt }));
+  const privateItems = rows_('Notifications').filter(n => String(n.Email).toLowerCase() === user.email).map(n => ({id: 'personal:' + String(n.Id), title: String(n.Title), body: String(n.Body), createdAt: n.CreatedAt}));
+  const items = publicItems.concat(privateItems).sort((a,b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 100);
+  items.forEach(n => { n.read = seen.has(n.id); });
+  return ok_({ notifications: items, unread: items.filter(n => !n.read).length });
+}
+
+function markNotificationRead(id) {
+  const user = getUserContext();
+  const key = String(id || '');
+  const visible = listNotifications().notifications.some(n => n.id === key);
+  if (!visible) throw new Error('اطلاعیه در دسترس شما نیست.');
+  if (!rows_('NotificationReads').some(r => String(r.Email).toLowerCase() === user.email && String(r.NotificationId) === key)) {
+    sheet_('NotificationReads').appendRow([user.email, key, nowIso_()]);
+  }
+  return ok_({});
+}
+
+/** فقط پس از تکمیل تمام مراحل فعال یک مسیر، اعلان یک‌بار برای همان کاربر ایجاد شود. */
+function notifyPathCompletion_(email, pathId) {
+  const path = rows_('Paths').find(p => String(p.PathId) === String(pathId) && truthy_(p.Active));
+  if (!path) return;
+  const items = itemsOfPath_(pathId), progress = getMyProgressMap_(email);
+  if (!items.length || !items.every(i => progress['item:' + String(i.ItemId)])) return;
+  if (rows_('Notifications').some(n => String(n.Email).toLowerCase() === email && String(n.PathId) === String(pathId))) return;
+  sheet_('Notifications').appendRow([newId_('NOTICE'), email, 'دوره آموزشی تکمیل شد', 'مسیر «' + String(path.Title) + '» برای شما تکمیل شد.', nowIso_(), String(pathId)]);
 }
 
 
@@ -1954,6 +2005,7 @@ function getBootstrap() {
     recommended: myPaths.filter(p => p.done === 0 && p.total > 0).slice(0, 3),
     recentActivity: recent,
     announcements: ann,
+    notifications: listNotifications().notifications,
     pageSize: CONFIG.PAGE_SIZE,
     roleLabels: ROLE_LABELS
   });

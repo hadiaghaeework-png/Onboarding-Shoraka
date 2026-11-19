@@ -45,7 +45,7 @@ const App = (() => {
           [fn].apply(null, args);
       });
     } else {
-      request = DemoAPI.request(fn, args).catch(err => { throw new Error((err && err.message) || String(err)); });
+      request = Promise.reject(new Error('اتصال به سرور Apps Script برقرار نیست. برنامه را از نشانی وب‌اپ منتشرشده باز کنید.')); 
     }
     if (key) { pendingReads.set(key, request); request.then(() => pendingReads.delete(key), () => pendingReads.delete(key)); }
     return request;
@@ -122,7 +122,7 @@ const App = (() => {
     { key: 'teams', label: 'تیم‌های من', icon: 'M4 19a8 8 0 0 1 16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8', roles: ['admin', 'team_manager', 'mentor', 'learner'] },
     { key: 'library', label: 'کتابخانه محتوا', icon: 'M4 5h6v14H4zM14 5h6v14h-6zM4 9h6M14 9h6', roles: ['admin', 'team_manager', 'mentor', 'learner'] },
     { key: 'transcript', label: 'کارنامه من', icon: 'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M9 12l2 2 4-4', roles: ['admin', 'team_manager', 'mentor', 'learner'] },
-    { key: 'admin', label: 'پنل مدیریت', icon: 'M12 3l8 4v5c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V7z', roles: ['admin', 'team_manager', 'mentor'] }
+    { key: 'admin', label: 'پنل مدیریت', icon: 'M12 3l8 4v5c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V7z', roles: ['admin'] }
   ];
   const ICONS = {
     folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -282,15 +282,11 @@ const App = (() => {
     $('#sideAvatar').textContent = initials(u.name || u.email);
     $('#sideName').textContent = u.name || u.email;
     $('#sideRole').textContent = u.roleLabel || u.role;
-    $('#demoBanner').hidden = !u.demo;
     renderSidebar();
-    // نشان اعلان
-    try {
-      const resp = b.announcements ? { announcements: b.announcements } : await callServer('listAnnouncements');
-      const n = (resp.announcements || []).length;
-      const badge = $('#bellBadge');
-      badge.hidden = n === 0; badge.textContent = fmtNum(n);
-    } catch (e) { /* نشان اختیاری است */ }
+    const unread = (b.notifications || []).filter(n => !n.read).length;
+    const badge = $('#bellBadge');
+    badge.hidden = !unread; badge.textContent = fmtNum(unread);
+
   }
 
   /* ════════════════════════════════════════
@@ -477,6 +473,7 @@ const App = (() => {
       + '<span class="status-dot' + (done ? ' done' : '') + '" title="' + (done ? 'تکمیل‌شده' : 'مشاهده نشده') + '"></span>'
       + '<div class="item-top"><div class="file-icon' + (isFolder ? ' folder' : '') + '">' + iconLabel + '</div><span class="tag ' + (isFolder ? 'tag-folder' : 'tag-muted') + '">' + (isFolder ? 'پوشه' : esc(item.icon || 'FILE')) + '</span></div>'
       + '<h4>' + esc(item.name) + '</h4>'
+      + (!isFolder ? '<div class="hint">پیشرفت مطالعه: ' + (done ? '۱۰۰٪' : '۰٪') + '</div>' + progressHTML(done ? 100 : 0) : '')
       + '<small>' + (isFolder ? 'ورود به محتوای پوشه' : esc(item.size || 'فایل آموزشی')) + (item.modified ? ' • ' + fmtDate(item.modified) : '') + '</small>'
       + '<div class="item-actions">'
       + (isFolder ? '<button class="btn btn-navy btn-sm" data-act="open">مشاهده پوشه</button>' : '<button class="btn btn-soft btn-sm" data-act="preview">پیش‌نمایش</button>')
@@ -638,6 +635,7 @@ const App = (() => {
             state.bootstrap = null;
             toast('این مرحله برای شما تکمیل شد ✓');
             go('path', params);
+            loadNotifications(true).catch(() => {});
           }).catch(err => { btn.disabled = false; toast(err.message, 'error'); });
         });
       }
@@ -909,6 +907,7 @@ const App = (() => {
 
   function refreshBadges() {
     state.bootstrap = null;
+    loadNotifications(true).catch(() => {});
     // به‌روزرسانی نرم آمار داشبورد بدون رفرش کامل صفحه
     if (state.view === 'dashboard') go('dashboard');
   }
@@ -919,19 +918,38 @@ const App = (() => {
   VIEWS.admin = async () => {
     const b = state.bootstrap || await callServer('getBootstrap');
     paintChromeIfNeeded(b);
-    if (state.user.role === 'learner') { $('#view').innerHTML = errorHTML('شما مجوز دسترسی به پنل مدیریت را ندارید.'); return; }
+    if (state.user.role !== 'admin') { $('#view').innerHTML = errorHTML('شما مجوز دسترسی به پنل مدیریت را ندارید.'); return; }
     if (window.Admin && window.Admin.render) return window.Admin.render($('#view'), window.__app);
     $('#view').innerHTML = errorHTML('ماژول مدیریت بارگذاری نشد.');
   };
 
   /* ───────── اعلانات (مدال زنگوله) ───────── */
+  let notificationPoll = null;
+  function loadNotifications(showPopup) {
+    return callServer('listNotifications').then(resp => {
+      const items = resp.notifications || [];
+      const badge = $('#bellBadge');
+      badge.hidden = !resp.unread; badge.textContent = fmtNum(resp.unread);
+      const first = items.find(n => !n.read);
+      if (showPopup && first && !overlay().classList.contains('open')) showNotification(first);
+      return items;
+    });
+  }
+  function showNotification(n) {
+    openModal({ title: esc(n.title), bodyHTML: '<p style="white-space:pre-wrap">'+esc(n.body)+'</p><p class="hint">'+fmtDateTime(n.createdAt)+'</p>',
+      footHTML: '<button class="btn btn-soft" data-close>بعداً</button><button class="btn btn-primary" id="noticeRead">خواندم</button>',
+      onMount: (body, foot) => $('#noticeRead', foot).addEventListener('click', () => {
+        const btn = $('#noticeRead', foot); btn.disabled = true;
+        callServer('markNotificationRead', n.id).then(() => { closeModal(); return loadNotifications(true); }).catch(err => { btn.disabled = false; toast(err.message, 'error'); });
+      }) });
+  }
   function openAnnouncementsModal() {
-    openModal({ title: 'اعلانات', bodyHTML: loadingHTML('در حال دریافت اعلانات…') });
-    callServer('listAnnouncements').then(resp => {
-      const ann = resp.announcements || [];
-      $('#modalBody').innerHTML = ann.length
-        ? '<div style="display:grid;gap:10px">' + ann.map(a => '<div class="ann-item"><div class="ann-ic">🔔</div><div style="min-width:0"><h5>' + esc(a.title) + '</h5><p>' + esc(a.body) + '</p><time>' + fmtDateTime(a.createdAt) + '</time></div></div>').join('') + '</div>'
-        : emptyHTML('🔔', 'اعلانی وجود ندارد', 'اعلان‌های آکادمی اینجا نمایش داده می‌شود.');
+    openModal({ title: 'اطلاعیه‌ها', bodyHTML: loadingHTML('در حال دریافت اطلاعیه‌ها…') });
+    loadNotifications(false).then(items => {
+      $('#modalBody').innerHTML = items.length
+        ? '<div style="display:grid;gap:10px">' + items.map((n,i) => '<div class="ann-item"><div class="ann-ic">🔔</div><div style="min-width:0;flex:1"><h5>'+esc(n.title)+(n.read?'':' • جدید')+'</h5><p>'+esc(n.body)+'</p><time>'+fmtDateTime(n.createdAt)+'</time></div><button class="btn btn-soft btn-sm" data-notice="'+i+'">مشاهده</button></div>').join('') + '</div>'
+        : emptyHTML('🔔', 'اطلاعیه‌ای وجود ندارد', 'اطلاعیه‌های شما اینجا نمایش داده می‌شود.');
+      $$('[data-notice]', $('#modalBody')).forEach(btn => btn.addEventListener('click', () => showNotification(items[Number(btn.dataset.notice)])));
     }).catch(err => { $('#modalBody').innerHTML = errorHTML(err.message); });
   }
 
@@ -966,18 +984,7 @@ const App = (() => {
     $('#sideUser').addEventListener('click', () => go('transcript'));
     $('#sideUser').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go('transcript'); } });
 
-    // حالت پیش‌نمایش: دکمه بازنشانی داده نمونه
-    if (isDemo()) {
-      const banner = $('#demoBanner');
-      const btn = document.createElement('button');
-      btn.className = 'btn btn-soft btn-sm';
-      btn.style.marginInlineStart = 'auto';
-      btn.textContent = '↺ بازنشانی داده نمونه';
-      btn.addEventListener('click', () => {
-        if (window.DemoAPI && DemoAPI.reset) { DemoAPI.reset(); toast('داده نمونه بازنشانی شد'); setTimeout(() => location.reload(), 700); }
-      });
-      banner.appendChild(btn);
-    }
+
   }
 
   async function boot() {
@@ -1006,6 +1013,8 @@ const App = (() => {
       state.pageSize = b.pageSize || 12;
       await paintChrome(b);
       go('dashboard');
+      loadNotifications(true).catch(err => toast(err.message, 'error'));
+      if (!notificationPoll) notificationPoll = setInterval(() => loadNotifications(true).catch(() => {}), 60000);
     } catch (err) {
       $('#topTitle').textContent = 'خطا در بارگذاری';
       $('#view').innerHTML = errorHTML(err.message, true);

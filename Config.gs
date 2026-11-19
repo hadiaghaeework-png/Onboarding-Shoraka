@@ -25,12 +25,14 @@ const SHEET_DEFS = {
   Paths:        ['PathId', 'TeamKey', 'Title', 'Description', 'Order', 'Active', 'CreatedAt'],
   PathItems:    ['ItemId', 'PathId', 'Order', 'Title', 'DriveItemId', 'ItemType', 'Required', 'QuizId', 'EstimatedMin', 'Active'],
   Progress:     ['Email', 'PathItemId', 'Status', 'CompletedAt', 'Score'],
-  Quizzes:      ['QuizId', 'RefType', 'RefId', 'Title', 'Description', 'PassScore', 'TimeLimitMin', 'MaxAttempts', 'ShuffleQuestions', 'ShuffleOptions', 'ShowAnswers', 'Active', 'CreatedAt'],
+  Quizzes:      ['QuizId', 'RefType', 'RefId', 'Title', 'Description', 'PassScore', 'TimeLimitMin', 'MaxAttempts', 'ShuffleQuestions', 'ShuffleOptions', 'ShowAnswers', 'Active', 'CreatedAt', 'TeamKey'],
   Questions:    ['QuestionId', 'QuizId', 'Order', 'Type', 'Text', 'OptionsJSON', 'CorrectJSON', 'Points'],
   Attempts:     ['AttemptId', 'Timestamp', 'Email', 'QuizId', 'Score', 'Passed', 'Status', 'AnswersJSON', 'Feedback', 'TimeSpentSec'],
   Announcements:['Id', 'Title', 'Body', 'Audience', 'Active', 'CreatedAt'],
   Activity:     ['Id', 'Timestamp', 'Email', 'Action', 'Detail'],
-  MentorNotes:  ['Id', 'Timestamp', 'MentorEmail', 'MenteeEmail', 'Note']
+  MentorNotes:  ['Id', 'Timestamp', 'MentorEmail', 'MenteeEmail', 'Note'],
+  Notifications:['Id', 'Email', 'Title', 'Body', 'CreatedAt', 'PathId'],
+  NotificationReads:['Email', 'NotificationId', 'ReadAt']
 };
 
 const ROLE_LABELS = {

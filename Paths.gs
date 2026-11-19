@@ -147,6 +147,7 @@ function markItemComplete(pathItemId) {
     throw new Error('برای تکمیل این مرحله ابتدا باید در آزمون متصل قبول شوید.');
   }
   markProgress_(user.email, 'item:' + pathItemId, 100);
+  notifyPathCompletion_(user.email, String(pathRow.PathId));
   logActivity_(user.email, 'path_item_complete', String(item.Title));
   return ok_({});
 }

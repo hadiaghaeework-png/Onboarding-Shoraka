@@ -8,7 +8,7 @@ files = ['Config.gs', 'Util.gs', 'Auth.gs', 'Drive.gs', 'Paths.gs', 'Quizzes.gs'
 code = '\n\n'.join('// ===== ' + name + ' =====\n' + (root / name).read_text(encoding='utf8') for name in files)
 (out / 'Code.gs').write_text(code, encoding='utf8')
 html = (root / 'Index.html').read_text(encoding='utf8')
-for name in ['Styles', 'Brand', 'Demo', 'AdminQuiz', 'Admin', 'App']:
+for name in ['Styles', 'Brand', 'AdminQuiz', 'Admin', 'App']:
     marker = "<?!= include_('" + name + "') ?>"
     if html.count(marker) != 1:
         raise RuntimeError('Missing or duplicate include: ' + name)

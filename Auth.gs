@@ -31,8 +31,10 @@ function getUserContext() {
     const storedRole = String(u.Role || '').trim().toLowerCase();
     if (['admin', 'learner'].indexOf(storedRole) === -1) throw new Error('نقش حساب نامعتبر است؛ با مدیر سامانه تماس بگیرید.');
     const role = normalizeRole_(storedRole);
+    const teams = splitCsv_(u.Teams);
+    if (role === 'learner' && (teams.length !== 1 || !TEAM_CONFIG.some(t => t.key === teams[0]))) throw new Error('تیم این کارشناس باید دقیقاً یک تیم معتبر باشد؛ با مدیر سامانه تماس بگیرید.');
     return { email: email, name: String(u.Name || email), role: role,
-      roleLabel: roleLabel_(role), teams: splitCsv_(u.Teams),
+      roleLabel: roleLabel_(role), teams: teams,
       canManage: role === 'admin', mentorEmail: '', demo: false };
   }
 

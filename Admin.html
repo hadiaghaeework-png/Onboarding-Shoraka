@@ -15,7 +15,7 @@ window.Admin = (() => {
       tabs.push({ key: 'incomplete', label: 'تکمیل‌نشده‌ها' });
     }
 
-    if (u.role === 'admin') { tabs.push({ key: 'users', label: 'کاربران' }); tabs.push({ key: 'content', label: 'مسیرهای آموزشی' }); tabs.push({ key: 'quizzes', label: 'آزمون‌ها' }); tabs.push({ key: 'review', label: 'بازبینی آزمون' }); tabs.push({ key: 'announcements', label: 'اطلاعیه‌ها' }); }
+    if (u.role === 'admin') { tabs.push({ key: 'users', label: 'دسترسی‌ها' }); tabs.push({ key: 'content', label: 'مسیرهای آموزشی' }); tabs.push({ key: 'quizzes', label: 'آزمون‌ها' }); tabs.push({ key: 'review', label: 'بازبینی آزمون' }); tabs.push({ key: 'announcements', label: 'اطلاعیه‌ها' }); }
 
 
 
@@ -198,7 +198,7 @@ window.Admin = (() => {
   function openUserModal(A, user, teams, onSaved) {
     user = user || {};
     const isEdit = !!user.email;
-    const teamChecks = teams.map(t => '<label class="check-row"><input type="checkbox" name="teams" value="' + A.esc(t.key) + '"' + (splitTeams(user.teams).includes(t.key) ? ' checked' : '') + '> تیم ' + A.esc(t.name) + '</label>').join('');
+    const teamChecks = teams.map(t => '<label class="check-row"><input type="radio" name="teams" value="' + A.esc(t.key) + '"' + (splitTeams(user.teams).includes(t.key) ? ' checked' : '') + '> تیم ' + A.esc(t.name) + '</label>').join('');
     A.openModal({
       title: isEdit ? 'ویرایش کاربر' : 'افزودن کاربر',
       footHTML: '<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveUserBtn">ذخیره</button>',
@@ -208,7 +208,7 @@ window.Admin = (() => {
         + '<div class="form-field"><label>نقش *</label><select name="role">'
         + [['learner', 'کارشناس'], ['admin', 'مدیر سامانه']].map(o => '<option value="' + o[0] + '"' + (user.role === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
         + '</select></div>'
-        + '<div class="form-field full"><label>تیم‌ها</label><div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 0">' + teamChecks + '</div></div>'
+        + '<div class="form-field full"><label>تیم کارشناس (فقط یک تیم)</label><div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 0">' + teamChecks + '</div></div>'
         + '</form>',
       onMount: (bodyEl, foot) => {
         foot.querySelector('#saveUserBtn').addEventListener('click', () => {
@@ -253,7 +253,7 @@ window.Admin = (() => {
         }).catch(e=>{mount.innerHTML=A.errorHTML(e.message)});
         function itemForm(it) {
           it=it||{};
-          A.openModal({title:it.itemId?'ویرایش مرحله':'مرحله جدید',bodyHTML:'<form class="form-grid"><div class="form-field full"><label>عنوان</label><input name="title" required value="'+A.esc(it.title||'')+'"></div><div class="form-field full"><label>شناسه یا پیوند فایل Drive</label><input name="driveItemId" required value="'+A.esc(it.driveItemId||'')+'"></div><div class="form-field"><label>ترتیب</label><input type="number" name="order" value="'+A.esc(it.order||1)+'"></div><div class="form-field"><label>زمان تقریبی (دقیقه)</label><input type="number" min="0" name="estimatedMin" value="'+A.esc(it.estimatedMin||0)+'"></div><div class="form-field full"><label>آزمون مرتبط</label><select name="quizId"><option value="">بدون آزمون</option>'+quizzes.map(q=>'<option value="'+A.esc(q.quizId)+'" '+(it.quizId===q.quizId?'selected':'')+'>'+A.esc(q.title)+'</option>').join('')+'</select></div><label class="check-row"><input type="checkbox" name="required" '+(it.required!==false?'checked':'')+'> اجباری</label><label class="check-row"><input type="checkbox" name="active" '+(it.active!==false?'checked':'')+'> فعال</label></form>',footHTML:'<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveItem">ذخیره</button>',onMount:(m,f)=>{f.querySelector('#saveItem').onclick=()=>{const form=m.querySelector('form');if(!form.reportValidity())return;const d=new FormData(form);const payload={itemId:it.itemId||'',pathId:p.pathId,title:d.get('title'),driveItemId:d.get('driveItemId'),order:+d.get('order'),estimatedMin:+d.get('estimatedMin'),quizId:d.get('quizId'),required:form.elements.required.checked,active:form.elements.active.checked};A.callServer('adminSavePathItem',payload).then(()=>{A.closeModal();A.toast('مرحله ذخیره شد');showItems(p)}).catch(e=>A.toast(e.message,'error'));};}});
+          A.openModal({title:it.itemId?'ویرایش مرحله':'مرحله جدید',bodyHTML:'<form class="form-grid"><div class="form-field full"><label>عنوان</label><input name="title" required value="'+A.esc(it.title||'')+'"></div><div class="form-field full"><label>شناسه یا پیوند فایل Drive</label><input name="driveItemId" required value="'+A.esc(it.driveItemId||'')+'"></div><div class="form-field"><label>ترتیب</label><input type="number" name="order" value="'+A.esc(it.order||1)+'"></div><div class="form-field"><label>زمان تقریبی (دقیقه)</label><input type="number" min="0" name="estimatedMin" value="'+A.esc(it.estimatedMin||0)+'"></div><div class="form-field full"><label>آزمون مرتبط</label><select name="quizId"><option value="">بدون آزمون</option>'+quizzes.filter(q=>q.teamKey===p.teamKey || q.quizId===it.quizId).map(q=>'<option value="'+A.esc(q.quizId)+'" '+(it.quizId===q.quizId?'selected':'')+'>'+A.esc(q.title)+'</option>').join('')+'</select></div><label class="check-row"><input type="checkbox" name="required" '+(it.required!==false?'checked':'')+'> اجباری</label><label class="check-row"><input type="checkbox" name="active" '+(it.active!==false?'checked':'')+'> فعال</label></form>',footHTML:'<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveItem">ذخیره</button>',onMount:(m,f)=>{f.querySelector('#saveItem').onclick=()=>{const form=m.querySelector('form');if(!form.reportValidity())return;const d=new FormData(form);const payload={itemId:it.itemId||'',pathId:p.pathId,title:d.get('title'),driveItemId:d.get('driveItemId'),order:+d.get('order'),estimatedMin:+d.get('estimatedMin'),quizId:d.get('quizId'),required:form.elements.required.checked,active:form.elements.active.checked};A.callServer('adminSavePathItem',payload).then(()=>{A.closeModal();A.toast('مرحله ذخیره شد');showItems(p)}).catch(e=>A.toast(e.message,'error'));};}});
         }
       }
     });

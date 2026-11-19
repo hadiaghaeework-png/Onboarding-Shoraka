@@ -1,0 +1,10 @@
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const db={Announcements:[{Id:'a',Title:'Hello',Body:'All',Audience:'all',Active:true},{Id:'secret',Title:'Other',Body:'X',Audience:'team:mlm',Active:true}],Notifications:[{Id:'n',Email:'u@example.test',Title:'Passed',Body:'Done',PathId:'p',CreatedAt:'2026-01-01'}],NotificationReads:[],Paths:[],PathItems:[],Progress:[]};
+const user={email:'u@example.test',role:'learner',teams:['account']};
+const ctx={rows_:n=>db[n]||[],getUserContext:()=>user,allowedTeams_:u=>u.teams,truthy_:v=>v===true,ok_:x=>x,nowIso_:()=>new Date().toISOString(),newId_:()=>Math.random().toString(),sheet_:n=>({appendRow:r=>db[n].push(n==='NotificationReads'?{Email:r[0],NotificationId:r[1],ReadAt:r[2]}:{Id:r[0],Email:r[1],Title:r[2],Body:r[3],CreatedAt:r[4],PathId:r[5]})})};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync('Admin.gs','utf8'),ctx);
+assert.equal(ctx.listNotifications().unread,2);assert.throws(()=>ctx.markNotificationRead('ann:secret'),/دسترس/);assert.throws(()=>ctx.markNotificationRead('personal:other'),/دسترس/);
+ctx.markNotificationRead('ann:a');ctx.markNotificationRead('ann:a');assert.equal(db.NotificationReads.length,1);assert.equal(ctx.listNotifications().unread,1);
+ctx.markNotificationRead('personal:n');assert.equal(ctx.listNotifications().unread,0);
+db.Paths.push({PathId:'path1',Title:'Course',Active:true});let progress={'item:one':true};ctx.itemsOfPath_=()=>[{ItemId:'one'},{ItemId:'two'}];ctx.getMyProgressMap_=()=>progress;ctx.notifyPathCompletion_(user.email,'path1');assert.equal(db.Notifications.length,1);progress['item:two']=true;ctx.notifyPathCompletion_(user.email,'path1');ctx.notifyPathCompletion_(user.email,'path1');assert.equal(db.Notifications.length,2);
+console.log('Notification visibility and read smoke tests passed (mocked GAS).');
