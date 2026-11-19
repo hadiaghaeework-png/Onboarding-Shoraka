@@ -129,6 +129,8 @@ window.Admin = (() => {
       html += attempts.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>آزمون</th><th>تاریخ</th><th>نمره</th><th>نتیجه</th></tr></thead><tbody>'
         + attempts.map(a => '<tr><td>' + A.esc(a.quizTitle) + '</td><td>' + A.fmtDateTime(a.timestamp) + '</td><td><strong>' + A.fmtNum(a.score) + '٪</strong></td><td>' + (a.passed ? '<span class="tag tag-ok">قبول</span>' : '<span class="tag tag-danger">رد</span>') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="hint">تلاش آزمونی ثبت نشده است.</p>';
 
+      if (u.role === 'admin' && m.teams && m.teams.length) html += '<h4 style="font-size:13px;margin:16px 0 8px">فایل‌های تیم و وضعیت ثبت‌شده</h4><p class="hint">تکمیل بر اساس ثبت دستی کارشناس است، نه تأیید مشاهده واقعی.</p><div id="memberFiles"></div>';
+
       html += '<h4 style="font-size:13px;margin:16px 0 8px">بازخورد منتور (' + A.fmtNum(notes.length) + ')</h4>';
       html += notes.length ? '<div style="display:grid;gap:8px">' + notes.map(n => '<div class="ann-item"><div class="ann-ic">🗒</div><div style="min-width:0"><p style="margin:0;color:var(--text);font-size:12px">' + A.esc(n.note) + '</p><time>' + A.fmtDateTime(n.timestamp) + ' — ' + A.esc(n.mentorEmail) + '</time></div></div>').join('') + '</div>' : '<p class="hint">هنوز بازخوردی ثبت نشده است.</p>';
 
@@ -138,6 +140,8 @@ window.Admin = (() => {
 
       const bodyEl = document.querySelector('#modalBody');
       bodyEl.innerHTML = html;
+      const filesMount = bodyEl.querySelector('#memberFiles');
+      if (filesMount) renderMemberFiles(filesMount, A, email, m.teams[0]);
       const form = bodyEl.querySelector('#noteForm');
       if (form) form.addEventListener('submit', e => {
         e.preventDefault();
@@ -147,6 +151,25 @@ window.Admin = (() => {
         A.callServer('addMentorNote', email, note).then(() => { A.toast('بازخورد ثبت شد'); openMemberModal(A, email); }).catch(err => A.toast(err.message, 'error'));
       });
     }).catch(err => { document.querySelector('#modalBody').innerHTML = A.errorHTML(err.message); });
+  }
+
+  function renderMemberFiles(mount, A, email, team) {
+    let stack=[], tokens=[''], page=0, seq=0;
+    function load() {
+      const request=++seq, folder=stack.length ? stack[stack.length-1].id : '';
+      mount.innerHTML=A.loadingHTML('دریافت فایل‌ها…');
+      A.callServer('reportMemberFiles',email,team,folder,tokens[page] || '').then(r=>{
+        if(request!==seq || !mount.isConnected)return;
+        const items=r.items||[]; if(r.nextPageToken)tokens[page+1]=r.nextPageToken;
+        mount.innerHTML='<div class="crumbs"><button id="memberRoot">ریشه تیم</button>'+stack.map((x,i)=>'<span>›</span><button data-crumb="'+i+'">'+A.esc(x.name)+'</button>').join('')+'</div><div class="table-wrap"><table class="data"><thead><tr><th>فایل یا پوشه</th><th>وضعیت</th><th>آزمون</th></tr></thead><tbody>'+items.map((it,i)=>'<tr><td>'+(it.kind==='folder'?'<button class="btn btn-soft btn-sm" data-folder="'+i+'">📁 '+A.esc(it.name)+'</button>':A.esc(it.name))+'</td><td>'+(it.kind==='folder'?'—':it.done?'✓ تکمیل‌شده':'○ ثبت نشده')+'</td><td>'+(!it.quizId?'آزمون ندارد':!it.attempted?'آزمون نداده':it.score===null?'در انتظار نمره':A.fmtNum(it.score)+'٪')+'</td></tr>').join('')+'</tbody></table></div><div class="pagination"><button class="btn btn-soft btn-sm" id="memberPrev" '+(!page?'disabled':'')+'>قبلی</button><span>صفحه '+A.fmtNum(page+1)+'</span><button class="btn btn-soft btn-sm" id="memberNext" '+(!r.nextPageToken?'disabled':'')+'>بعدی</button></div>';
+        mount.querySelector('#memberRoot').onclick=()=>{stack=[];tokens=[''];page=0;load()};
+        mount.querySelectorAll('[data-crumb]').forEach(b=>b.onclick=()=>{stack=stack.slice(0,+b.dataset.crumb+1);tokens=[''];page=0;load()});
+        mount.querySelectorAll('[data-folder]').forEach(b=>b.onclick=()=>{const it=items[+b.dataset.folder];stack.push({id:it.id,name:it.name});tokens=[''];page=0;load()});
+        mount.querySelector('#memberPrev').onclick=()=>{if(page){page--;load()}};
+        mount.querySelector('#memberNext').onclick=()=>{if(r.nextPageToken){page++;load()}};
+      }).catch(e=>{if(request===seq && mount.isConnected)mount.innerHTML=A.errorHTML(e.message)});
+    }
+    load();
   }
 
   /* ══════════ تب: تکمیل‌نشده‌ها ══════════ */
@@ -171,7 +194,7 @@ window.Admin = (() => {
       const roleLabel = r => ({ admin: 'مدیر سامانه', team_manager: 'مدیر تیم', mentor: 'منتور', learner: 'کارشناس' }[r] || r);
 
       body.innerHTML = '<div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>مدیریت کاربران <span class="tab-count">' + A.fmtNum(users.length) + '</span></h3>'
-        + '<div style="display:flex;gap:8px"><input class="filter" id="userSearch" placeholder="جست‌وجو در نام/نام کاربری…"><button class="btn btn-primary btn-sm" id="addUserBtn">+ افزودن کاربر</button></div></div>'
+        + '<div style="display:flex;gap:8px"><input class="filter" id="userSearch" placeholder="جست‌وجو در نام/نام کاربری…"><button class="btn btn-soft btn-sm" id="userTemplate">قالب CSV</button><label class="btn btn-soft btn-sm">ورود XLSX / CSV<input type="file" id="userImport" accept=".xlsx,.csv" hidden></label><button class="btn btn-primary btn-sm" id="addUserBtn">+ افزودن کاربر</button></div></div>'
         + '<div class="table-wrap"><table class="data" id="usersTable"><thead><tr><th>نام</th><th>نام کاربری</th><th>نقش</th><th>تیم‌ها</th><th>منتور</th><th>وضعیت حساب</th><th>آخرین ورود</th><th>حضور تقریبی</th><th></th></tr></thead><tbody>'
         + users.map(u => '<tr data-email="' + A.esc(u.email) + '" data-search="' + A.esc((u.name + ' ' + u.email).toLowerCase()) + '"><td><strong>' + A.esc(u.name || '—') + '</strong></td><td class="hint">' + A.esc(u.email) + '</td><td>' + A.esc(roleLabel(u.role)) + '</td><td>' + A.esc(splitTeams(u.teams).map(teamName).join('، ')) + '</td><td class="hint">' + A.esc(u.mentorEmail || '—') + '</td><td>' + (u.active ? '<span class="tag tag-ok">فعال</span>' : '<span class="tag tag-danger">غیرفعال</span>') + '</td><td>' + A.fmtDateTime(u.lastLogin) + '</td><td>' + (u.online ? 'فعال اخیراً' : u.lastLogin ? 'آفلاین / نامشخص' : 'هنوز وارد نشده') + '</td><td style="white-space:nowrap"><button class="btn btn-soft btn-sm" data-edit>ویرایش</button> <button class="btn ' + (u.active ? 'btn-danger' : 'btn-ok') + ' btn-sm" data-toggle>' + (u.active ? 'غیرفعال' : 'فعال') + '</button></td></tr>').join('')
         + '</tbody></table></div></div>';
@@ -180,6 +203,23 @@ window.Admin = (() => {
       search.addEventListener('input', () => {
         const q = search.value.trim().toLowerCase();
         body.querySelectorAll('#usersTable tbody tr').forEach(tr => { tr.style.display = !q || tr.getAttribute('data-search').includes(q) ? '' : 'none'; });
+      });
+      body.querySelector('#userTemplate').addEventListener('click', () => {
+        const blob = new Blob(['\ufeffusername,name,password,role,teams,mentor,active\r\n'], {type:'text/csv;charset=utf-8'});
+        const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href=url; a.download='users-template.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+      });
+      const importInput = body.querySelector('#userImport');
+      importInput.addEventListener('change', () => {
+        const file=importInput.files && importInput.files[0]; if(!file) return;
+        if(file.size>1024*1024) { A.toast('حداکثر حجم فایل یک مگابایت است', 'error'); importInput.value=''; return; }
+        A.confirmModal({title:'ورود گروهی کاربران',message:'حداکثر ۲۰ ردیف پردازش می‌شود. هر ردیف مستقل ذخیره می‌شود و امکان موفقیت بخشی وجود دارد. برای XLSX فایل موقت در Drive ساخته و حذف می‌شود. ادامه می‌دهید؟',onConfirm:()=>{
+          const reader=new FileReader(); importInput.disabled=true;
+          reader.onerror=()=>{importInput.disabled=false;importInput.value='';A.toast('خواندن فایل ناموفق بود','error');};
+          reader.onload=()=>A.callServer('adminImportUsers',file.name,String(reader.result).split(',')[1]||'').then(r=>{
+            const rows=r.results||[]; A.openModal({title:'نتیجه ورود گروهی',bodyHTML:'<div class="table-wrap"><table class="data"><thead><tr><th>ردیف</th><th>نام کاربری</th><th>نتیجه</th></tr></thead><tbody>'+rows.map(x=>'<tr><td>'+A.fmtNum(x.row)+'</td><td>'+A.esc(x.username)+'</td><td>'+A.esc(x.ok?'ذخیره شد':x.error)+'</td></tr>').join('')+'</tbody></table></div>',footHTML:'<button class="btn btn-primary" data-close>بستن</button>'}); renderUsers(body,A);
+          }).catch(e=>A.toast(e.message,'error')).finally(()=>{importInput.disabled=false;importInput.value='';});
+          reader.readAsDataURL(file);
+        }});
       });
       body.querySelector('#addUserBtn').addEventListener('click', () => openUserModal(A, null, teams, users, () => renderUsers(body, A)));
       body.querySelectorAll('[data-edit]').forEach(btn => btn.addEventListener('click', () => {

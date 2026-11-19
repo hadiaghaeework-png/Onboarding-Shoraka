@@ -106,11 +106,11 @@ function apiRequest(token, operation, args) {
   const endpoints = {
     getBootstrap, listMyPaths, getPath, markItemComplete, getLibraryPage, getItemDetail, markDriveItemComplete,
     getQuizForAttempt, submitQuiz, getMyTranscript, listAnnouncements, listNotifications, markNotificationRead,
-    adminListUsers, adminUpsertUser, adminSetUserActive, adminTeamsStatus, adminCreateTeam, adminUploadFile, adminTrashFile, adminListPaths, adminSavePath, adminDeletePath,
+    adminListUsers, adminUpsertUser, adminSetUserActive, adminTeamsStatus, adminImportUsers, adminCreateTeam, adminUploadFile, adminTrashFile, adminListPaths, adminSavePath, adminDeletePath,
     adminPathItems, adminSavePathItem, adminDeletePathItem, adminDriveMeta, adminListQuizzes, adminGetQuiz, adminSaveQuiz,
     adminDeleteQuiz, adminSaveQuestion, adminDeleteQuestion, adminListAttempts, adminGetAttemptDetail, adminReviewAttempt,
     adminListAnnouncements, adminSaveAnnouncement, adminDeleteAnnouncement, reportSummary, reportTeamMembers, reportMember,
-    reportIncomplete, reportExportCsv, addMentorNote, presencePing
+    reportIncomplete, reportExportCsv, reportMemberFiles, addMentorNote, presencePing
   };
   if (!Object.prototype.hasOwnProperty.call(endpoints, operation) || !Array.isArray(args) || args.length > 10) throw new Error('درخواست نامعتبر است.');
   CURRENT_SESSION_USERNAME_ = session.username;

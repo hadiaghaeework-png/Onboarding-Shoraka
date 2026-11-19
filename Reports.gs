@@ -303,3 +303,23 @@ function addMentorNote(menteeEmail, note) {
   logActivity_(user.email, 'mentor_note', target);
   return ok_({});
 }
+
+/** گزارش صفحه‌ای فایل‌های یک کارشناس؛ علامت تکمیل بر اساس ثبت دستی است. */
+function reportMemberFiles(email, teamKey, folderId, pageToken) {
+  const user = getUserContext(); requireRole_(user, ['admin']);
+  const target = String(email || '').toLowerCase().trim();
+  const member = activeUsers_().find(u => u.email === target && u.role === 'learner');
+  if (!member || member.teams.indexOf(String(teamKey)) === -1) throw new Error('کارشناس عضو این تیم نیست.');
+  const page = getLibraryPage(String(folderId || ''), String(pageToken || ''), '', 'all', String(teamKey));
+  const progress = getMyProgressMap_(target);
+  const scores = {};
+  rows_('Attempts').filter(a => String(a.Email).toLowerCase() === target && String(a.Status) !== 'in_progress').forEach(a => {
+    const key = String(a.QuizId), prev = scores[key];
+    if (!prev || new Date(a.Timestamp) > new Date(prev.Timestamp)) scores[key] = a;
+  });
+  page.items = page.items.map(item => {
+    const p = progress['drive:' + item.id], quizId = item.quiz && item.quiz.quizId, attempt = quizId && scores[quizId];
+    return {id:item.id,name:item.name,kind:item.kind,done:!!p && p.status === 'completed',quizId:quizId || '',attempted:!!attempt,score:attempt && attempt.Score !== '' && attempt.Score != null ? Number(attempt.Score) : null};
+  });
+  return page;
+}

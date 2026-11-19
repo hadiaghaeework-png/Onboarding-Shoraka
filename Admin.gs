@@ -27,11 +27,13 @@ function adminUpsertUser(payload) {
   requireRole_(user, ['admin']);
   if (!payload || !payload.email) throw new Error('ایمیل کاربر الزامی است.');
   const email = String(payload.email).toLowerCase().trim();
+  if (/^[=+\-@]/.test(String(payload.name || '').trim())) throw new Error('نام نباید با نویسه فرمول آغاز شود.');
   if (!/^[a-z0-9._@-]{3,100}$/.test(email)) throw new Error('نام کاربری نامعتبر است.');
   if (payload.password && (typeof payload.password !== 'string' || payload.password.length < 12 || payload.password.length > 128)) throw new Error('رمز باید ۱۲ تا ۱۲۸ نویسه باشد.');
   if (['admin', 'mentor', 'learner'].indexOf(String(payload.role)) === -1) throw new Error('نقش باید مدیر، منتور یا کارشناس باشد.');
   const role = normalizeRole_(payload.role);
   if (email === user.email && role !== 'admin') throw new Error('نمی‌توانید نقش خودتان را تغییر دهید.');
+  if (email === user.email && payload.active === false) throw new Error('نمی‌توانید حساب خودتان را غیرفعال کنید.');
   const teams = (payload.teams || []).filter(k => teamConfigs_().some(t => t.key === k));
   if (role === 'mentor' && (!teams.length || teams.length !== (payload.teams || []).length)) throw new Error('برای منتور حداقل یک تیم معتبر انتخاب کنید.');
   if (role === 'learner' && (teams.length !== 1 || (payload.teams || []).length !== 1)) throw new Error('برای هر کارشناس دقیقاً یک تیم معتبر انتخاب کنید.');
@@ -59,7 +61,7 @@ function adminUpsertUser(payload) {
   if (!payload.password) throw new Error('برای کاربر جدید رمز عبور الزامی است.');
   savePassword_(email, payload.password);
   sh.appendRow([email, String(payload.name || ''), role, teams.join(','),
-    String(payload.mentorEmail || '').toLowerCase().trim(), !!payload.canManage, true, nowIso_()]);
+    String(payload.mentorEmail || '').toLowerCase().trim(), !!payload.canManage, payload.active !== false, nowIso_()]);
   logActivity_(user.email, 'user_create', email);
   return ok_({ saved: email, created: true });
 }
@@ -759,4 +761,51 @@ function adminCreateTeam(key, name) {
     logActivity_(user.email, 'team_create', key + ': ' + name);
     return ok_({key:key, folderId:folder.getId()});
   } finally { lock.releaseLock(); }
+}
+
+/** ورود گروهی حداکثر ۲۰ ردیف در هر درخواست؛ نتیجه هر ردیف جداگانه گزارش می‌شود. */
+function adminImportUsers(filename, encoded) {
+  const user = getUserContext(); requireRole_(user, ['admin']);
+  const name = String(filename || '').toLowerCase();
+  const data = String(encoded || '');
+  if (!/\.(xlsx|csv)$/.test(name) || !data || data.length > 1400000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw new Error('فقط CSV یا XLSX تا یک مگابایت مجاز است.');
+  const bytes = Utilities.base64Decode(data);
+  if (bytes.length > 1024*1024) throw new Error('فایل بزرگ‌تر از یک مگابایت است.');
+  let values;
+  if (/\.csv$/.test(name)) {
+    values = Utilities.parseCsv(Utilities.newBlob(bytes).getDataAsString('UTF-8').replace(/^\uFEFF/, ''));
+  } else {
+    let tempId = '';
+    try {
+      const blob = Utilities.newBlob(bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'academy-import.xlsx');
+      const temp = Drive.Files.create({name:'academy-temporary-user-import', mimeType:'application/vnd.google-apps.spreadsheet'}, blob, {fields:'id'});
+      tempId = temp.id;
+      const sh = SpreadsheetApp.openById(tempId).getSheets()[0];
+      if (sh.getLastRow() > 21 || sh.getLastColumn() > 20) throw new Error('حداکثر ۲۰ کاربر در هر فایل مجاز است.');
+      values = sh.getDataRange().getDisplayValues();
+    } finally {
+      if (tempId) Drive.Files.remove(tempId);
+    }
+  }
+  if (!Array.isArray(values) || values.length < 2 || values.length > 21) throw new Error('فایل باید ۱ تا ۲۰ ردیف داده داشته باشد.');
+  const expected = ['username','name','password','role','teams','mentor','active'];
+  const header = values[0].map(x => String(x).trim().toLowerCase());
+  if (expected.some((x,i) => header[i] !== x)) throw new Error('سرستون‌ها مطابق فایل نمونه نیستند.');
+  const results = [];
+  const seen = {};
+  values.slice(1).forEach((row,i) => {
+    const username = String(row[0] || '').trim().toLowerCase();
+    try {
+      if (seen[username]) throw new Error('نام کاربری در فایل تکراری است.');
+      seen[username] = true;
+      const activeText = String(row[6] || '').trim().toLowerCase();
+      if (activeText && !['true','false','1','0'].includes(activeText)) throw new Error('وضعیت باید true یا false باشد.');
+      const payload = {email:username, name:String(row[1] || '').trim(), password:String(row[2] || ''), role:String(row[3] || '').trim().toLowerCase(), teams:splitCsv_(row[4]), mentorEmail:String(row[5] || '').trim(), canManage:String(row[3] || '').trim().toLowerCase()==='admin'};
+      if (/^[=+\-@]/.test(payload.name)) throw new Error('نام نباید با نویسه فرمول آغاز شود.');
+      if (activeText) payload.active = activeText === 'true' || activeText === '1';
+      adminUpsertUser(payload);
+      results.push({row:i+2, username:username, ok:true});
+    } catch (e) { results.push({row:i+2, username:username, ok:false, error:String(e.message || e)}); }
+  });
+  return ok_({results:results});
 }

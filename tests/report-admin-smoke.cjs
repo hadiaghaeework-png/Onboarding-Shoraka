@@ -7,3 +7,9 @@ let r=ctx.reportSummary('a');assert.equal(r.teams[0].members,1);assert.equal(r.t
 data.Progress[0].Status='completed';assert.equal(ctx.reportSummary('a').teams[0].avgCompletion,100);
 user={email:'agent',role:'learner',teams:['a']};assert.throws(()=>ctx.reportSummary('a'),/denied/);assert.throws(()=>ctx.reportTeamMembers('b'),/denied/);
 console.log('Admin reports aggregation and authorization passed (mocked GAS).');
+user={email:'admin',role:'admin',teams:[]};
+ctx.getLibraryPage=()=>({items:[{id:'file1',name:'doc',kind:'file',quiz:{quizId:'q'}},{id:'folder1',name:'folder',kind:'folder',quiz:{}}],nextPageToken:'next'});
+ctx.getMyProgressMap_=()=>({'drive:file1':{status:'completed'}});
+let files=ctx.reportMemberFiles('agent','a','','');assert.equal(files.items[0].done,true);assert.equal(files.items[0].score,80);assert.equal(files.nextPageToken,'next');assert.throws(()=>ctx.reportMemberFiles('agent','b','',''),/عضو/);
+user={email:'agent',role:'learner',teams:['a']};assert.throws(()=>ctx.reportMemberFiles('agent','a','',''),/denied/);
+console.log('Member file report scoping passed (mocked GAS).');

@@ -1,0 +1,7 @@
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+let user={role:'admin'}, saved=[], removed=[], readRows=[['username','name','password','role','teams','mentor','active'],['user1','One','valid-password','learner','account','','true'],['user1','Duplicate','','learner','account','',''],['user2','Two','another-pass','learner','account','','false']];
+const ctx={getUserContext:()=>user,requireRole_:(u,roles)=>{if(!roles.includes(u.role))throw Error('denied')},Utilities:{base64Decode:s=>Array.from(Buffer.from(s,'base64')),newBlob:()=>({})},Drive:{Files:{create:()=>({id:'temp'}),remove:id=>removed.push(id)}},SpreadsheetApp:{openById:()=>({getSheets:()=>[{getLastRow:()=>readRows.length,getLastColumn:()=>7,getDataRange:()=>({getDisplayValues:()=>readRows})}]})},splitCsv_:s=>String(s||'').split(',').filter(Boolean),ok_:v=>v,console};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync('Admin.gs','utf8'),ctx);ctx.adminUpsertUser=p=>saved.push(p);
+const result=ctx.adminImportUsers('users.xlsx','aGk=');assert.deepEqual(removed,['temp']);assert.equal(saved.length,2);assert.equal(result.results[1].ok,false);assert.equal(saved[0].active,true);assert.equal(saved[1].active,false);
+user={role:'learner'};assert.throws(()=>ctx.adminImportUsers('users.xlsx','aGk='),/denied/);user={role:'admin'};readRows[0][0]='invalid';assert.throws(()=>ctx.adminImportUsers('users.xlsx','aGk='),/سرستون/);assert.equal(removed.length,2);
+console.log('Bulk user import authorization, row results and cleanup passed (mocked GAS).');
