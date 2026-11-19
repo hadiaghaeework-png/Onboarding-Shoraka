@@ -49,7 +49,7 @@ function provisionInitialAdmin_() {
     users.getRange(existing.__row, 3).setValue('admin');
     users.getRange(existing.__row, 6).setValue(true);
     users.getRange(existing.__row, 7).setValue(true);
-  } else users.appendRow([username, 'مدیر سامانه', 'admin', TEAM_CONFIG.map(t=>t.key).join(','), '', true, true, nowIso_()]);
+  } else users.appendRow([username, 'مدیر سامانه', 'admin', teamConfigs_().map(t=>t.key).join(','), '', true, true, nowIso_()]);
   props.deleteProperty('INITIAL_ADMIN_USERNAME'); props.deleteProperty('INITIAL_ADMIN_PASSWORD');
 }
 
@@ -71,7 +71,7 @@ function setupAcademy_() {
   if (usersSheet.getLastRow() < 2) {
     const owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase().trim();
     if (!owner) throw new Error('ایمیل مالک قابل تشخیص نیست؛ مدیر اولیه را در شیت Users ثبت کنید.');
-    usersSheet.appendRow([owner, owner, 'admin', TEAM_CONFIG.map(t => t.key).join(','), '', true, true, nowIso_()]);
+    usersSheet.appendRow([owner, owner, 'admin', teamConfigs_().map(t => t.key).join(','), '', true, true, nowIso_()]);
   }
 
 

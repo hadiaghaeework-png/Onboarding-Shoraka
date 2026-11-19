@@ -311,7 +311,7 @@ const App = (() => {
     const b = state.bootstrap || await callServer('getBootstrap');
     paintChromeIfNeeded(b);
     const teams = b.teams || [];
-    if (!teams.length) {
+    if (!teams.length && b.user.role !== 'admin') {
       $('#view').innerHTML = emptyHTML('🏢', 'برای حساب شما تیمی تعریف نشده است', 'اگر فکر می‌کنید اشتباهی رخ داده، با مدیر سامانه تماس بگیرید.');
       return;
     }
@@ -321,7 +321,7 @@ const App = (() => {
     ));
     const byKey = {}; stats.forEach(s => byKey[s.key] = s.paths);
 
-    let html = '<div class="section-head"><h3>تیم‌های در دسترس شما</h3><small>نمایش بر اساس سطح دسترسی — هر تیم فضای آموزشی مستقل دارد</small></div>'
+    let html = '<div class="section-head"><h3>تیم‌های در دسترس شما</h3>' + (b.user.role === 'admin' ? '<button class="btn btn-primary btn-sm" id="createTeam">+ ساخت تیم</button>' : '<small>نمایش بر اساس سطح دسترسی — هر تیم فضای آموزشی مستقل دارد</small>') + '</div>'
       + '<div class="teams">' + teams.map(t => {
         const paths = byKey[t.key] || [];
         const totalItems = paths.reduce((s, p) => s + p.total, 0);
@@ -338,6 +338,9 @@ const App = (() => {
       }).join('') + '</div>';
     $('#view').innerHTML = html;
     $$('#view [data-team]').forEach(btn => btn.addEventListener('click', () => go('team', { teamKey: btn.getAttribute('data-team') })));
+    const create = $('#createTeam');
+    if (create) create.onclick = () => openModal({title:'ساخت تیم', bodyHTML:'<form id="teamForm" class="form-grid"><div class="form-field full"><label>نام تیم</label><input name="name" required maxlength="80"></div><div class="form-field full"><label>کلید انگلیسی یکتا (غیرقابل تغییر)</label><input name="key" required pattern="[a-zA-Z0-9_-]{2,40}"></div></form>', footHTML:'<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveTeam">ساخت تیم و پوشه</button>', onMount:(body,foot)=>{ foot.querySelector('#saveTeam').onclick=()=>{const form=body.querySelector('form');if(!form.reportValidity())return;const d=new FormData(form),btn=foot.querySelector('#saveTeam');btn.disabled=true;callServer('adminCreateTeam',d.get('key'),d.get('name')).then(()=>{closeModal(); state.bootstrap=null;toast('تیم ساخته شد');go('teams');}).catch(e=>{btn.disabled=false;toast(e.message,'error')});};}});
+
   };
 
   function paintChromeIfNeeded(b) { if (b && b.user) { state.bootstrap = b; state.teams = b.teams || []; paintChrome(b); } }
@@ -415,6 +418,7 @@ const App = (() => {
     }
     html += '<input class="filter" id="libSearch" type="search" placeholder="جست‌وجو در این پوشه…" style="min-width:180px" aria-label="جست‌وجو">'
       + '<select class="filter" id="libType" aria-label="فیلتر نوع"><option value="all">همه موارد</option><option value="folder">فقط پوشه‌ها</option><option value="file">فقط فایل‌ها</option></select>'
+      + (state.user.role === 'admin' ? '<label class="btn btn-primary btn-sm">آپلود فایل <input id="libUpload" type="file" hidden></label>' : '')
       + '<span class="hint" id="libCount" style="margin-inline-start:auto"></span>'
       + '</div>'
       + '<nav class="crumbs" id="libCrumbs" aria-label="مسیر پوشه"></nav>'
@@ -468,6 +472,15 @@ const App = (() => {
       }
     }
 
+    const upload = $('#libUpload', mount);
+    if (upload) upload.addEventListener('change', () => {
+      const file = upload.files && upload.files[0]; if (!file) return;
+      if (file.size > 4*1024*1024) { toast('حداکثر اندازه فایل ۴ مگابایت است.', 'error'); upload.value=''; return; }
+      const reader = new FileReader(); upload.disabled = true;
+      reader.onerror = () => { upload.disabled=false; upload.value=''; toast('خواندن فایل ممکن نشد.', 'error'); };
+      reader.onload = () => { const content=String(reader.result).split(',')[1] || ''; callServer('adminUploadFile',lib.teamKey,currentFolderId(),file.name,file.type || 'application/octet-stream',content).then(()=>{toast('فایل بارگذاری شد');lib.page=1;lib.pageTokens=[''];load();}).catch(e=>toast(e.message,'error')).finally(()=>{upload.disabled=false;upload.value='';}); };
+      reader.readAsDataURL(file);
+    });
     let searchTimer = null;
     lib._reload = load;
     if (teamSel) teamSel.addEventListener('change', () => { lib.teamKey = teamSel.value; lib.folderStack = []; lib.page = 1; lib.pageTokens = ['']; load(); });
@@ -493,6 +506,7 @@ const App = (() => {
       + '<div class="item-actions">'
       + (isFolder ? '<button class="btn btn-navy btn-sm" data-act="open">مشاهده پوشه</button>' : '<button class="btn btn-soft btn-sm" data-act="preview">پیش‌نمایش</button>')
       + (quiz ? '<button class="btn btn-primary btn-sm" data-act="quiz">شروع آزمون</button>' : '')
+      + (state.user.role === 'admin' && !isFolder ? '<button class="btn btn-danger btn-sm" data-act="trash">حذف</button>' : '')
       + '</div></article>';
   }
   function wireItemCard(card, lib) {
@@ -504,6 +518,8 @@ const App = (() => {
         reload();
       } else if (name === 'preview') {
         openItemPreview(d, lib);
+      } else if (name === 'trash') {
+        confirmModal({title:'انتقال به زباله‌دان',message:'فایل «' + d.name + '» از Drive به زباله‌دان منتقل شود؟',danger:true,onConfirm:()=>callServer('adminTrashFile',lib.teamKey,d.id).then(()=>{toast('فایل به زباله‌دان منتقل شد');reload();}).catch(e=>toast(e.message,'error'))});
       } else if (name === 'quiz') {
         startQuizByRef(d.quiz && d.quiz !== '1' ? d.quiz : null, d, lib);
       }

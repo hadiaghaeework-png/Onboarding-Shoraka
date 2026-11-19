@@ -44,3 +44,12 @@ const ROLE_LABELS = {
 };
 
 const QUESTION_TYPES = ['mcq', 'multi', 'tf', 'essay', 'scenario'];
+
+// تیم‌های اولیه دست‌نخورده باقی می‌مانند؛ تیم‌های جدید با شناسه پوشه در Properties ثبت می‌شوند.
+function teamConfigs_() {
+  const raw = PropertiesService.getScriptProperties().getProperty('ACADEMY_EXTRA_TEAMS');
+  if (!raw) return TEAM_CONFIG;
+  const extra = JSON.parse(raw);
+  if (!Array.isArray(extra) || extra.some(t => !t || !/^[a-z0-9_-]{2,40}$/.test(t.key) || !t.name || !t.folderId)) throw new Error('پیکربندی تیم‌ها نامعتبر است.');
+  return TEAM_CONFIG.concat(extra.map(t => ({key:t.key, name:t.name, folderId:t.folderId, aliases:[], color:'blue', icon:'◈'})));
+}

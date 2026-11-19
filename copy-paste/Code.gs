@@ -46,6 +46,15 @@ const ROLE_LABELS = {
 
 const QUESTION_TYPES = ['mcq', 'multi', 'tf', 'essay', 'scenario'];
 
+// تیم‌های اولیه دست‌نخورده باقی می‌مانند؛ تیم‌های جدید با شناسه پوشه در Properties ثبت می‌شوند.
+function teamConfigs_() {
+  const raw = PropertiesService.getScriptProperties().getProperty('ACADEMY_EXTRA_TEAMS');
+  if (!raw) return TEAM_CONFIG;
+  const extra = JSON.parse(raw);
+  if (!Array.isArray(extra) || extra.some(t => !t || !/^[a-z0-9_-]{2,40}$/.test(t.key) || !t.name || !t.folderId)) throw new Error('پیکربندی تیم‌ها نامعتبر است.');
+  return TEAM_CONFIG.concat(extra.map(t => ({key:t.key, name:t.name, folderId:t.folderId, aliases:[], color:'blue', icon:'◈'})));
+}
+
 
 // ===== Util.gs =====
 /*******************************************************
@@ -189,8 +198,8 @@ function getUserContext() {
   const storedRole = String(u.Role || '').trim().toLowerCase();
   if (['admin', 'mentor', 'learner'].indexOf(storedRole) === -1) throw new Error('نقش حساب نامعتبر است.');
   const role = normalizeRole_(storedRole), teams = splitCsv_(u.Teams);
-  if (role === 'learner' && (teams.length !== 1 || !TEAM_CONFIG.some(t => t.key === teams[0]))) throw new Error('تیم این کارشناس باید دقیقاً یک تیم معتبر باشد.');
-  if (role === 'mentor' && (!teams.length || teams.some(t => !TEAM_CONFIG.some(x => x.key === t)))) throw new Error('تیم‌های منتور نامعتبر است.');
+  if (role === 'learner' && (teams.length !== 1 || !teamConfigs_().some(t => t.key === teams[0]))) throw new Error('تیم این کارشناس باید دقیقاً یک تیم معتبر باشد.');
+  if (role === 'mentor' && (!teams.length || teams.some(t => !teamConfigs_().some(x => x.key === t)))) throw new Error('تیم‌های منتور نامعتبر است.');
   return CURRENT_USER_CONTEXT_ = {email: username, name: String(u.Name || username), role: role, roleLabel: roleLabel_(role), teams: teams, canManage: role === 'admin', mentorEmail: String(u.MentorEmail || '').toLowerCase(), demo: false};
 }
 
@@ -270,7 +279,7 @@ function apiRequest(token, operation, args) {
   const endpoints = {
     getBootstrap, listMyPaths, getPath, markItemComplete, getLibraryPage, getItemDetail, markDriveItemComplete,
     getQuizForAttempt, submitQuiz, getMyTranscript, listAnnouncements, listNotifications, markNotificationRead,
-    adminListUsers, adminUpsertUser, adminSetUserActive, adminTeamsStatus, adminListPaths, adminSavePath, adminDeletePath,
+    adminListUsers, adminUpsertUser, adminSetUserActive, adminTeamsStatus, adminCreateTeam, adminUploadFile, adminTrashFile, adminListPaths, adminSavePath, adminDeletePath,
     adminPathItems, adminSavePathItem, adminDeletePathItem, adminDriveMeta, adminListQuizzes, adminGetQuiz, adminSaveQuiz,
     adminDeleteQuiz, adminSaveQuestion, adminDeleteQuestion, adminListAttempts, adminGetAttemptDetail, adminReviewAttempt,
     adminListAnnouncements, adminSaveAnnouncement, adminDeleteAnnouncement, reportSummary, reportTeamMembers, reportMember,
@@ -290,8 +299,8 @@ function requireRole_(user, roles) {
 
 /** تیم‌های مجاز این کاربر (admin همه تیم‌های پیکربندی‌شده را می‌بیند) */
 function allowedTeams_(user) {
-  if (user.role === 'admin') return TEAM_CONFIG.map(t => t.key);
-  return (user.teams || []).filter(k => TEAM_CONFIG.some(t => t.key === k));
+  if (user.role === 'admin') return teamConfigs_().map(t => t.key);
+  return (user.teams || []).filter(k => teamConfigs_().some(t => t.key === k));
 }
 
 function assertTeamAccess_(user, teamKey) {
@@ -308,7 +317,7 @@ function canManageTeam_(user, teamKey) {
 }
 
 function teamConfigByKey_(key) {
-  return TEAM_CONFIG.find(t => t.key === key) || null;
+  return teamConfigs_().find(t => t.key === key) || null;
 }
 
 /** آیا targetId (پوشه/فایل Drive) داخل teamRootId قرار دارد؟ حداکثر ۳۰ سطح بالاروی */
@@ -375,10 +384,10 @@ function findTeamFolders_(user) {
     }
     cachePut_(cacheKey, folders, 600);
   }
-  return TEAM_CONFIG
+  return teamConfigs_()
     .filter(team => allowedTeams_(user).indexOf(team.key) !== -1)
     .map(team => {
-      const folder = folders.find(f =>
+      const folder = folders.find(f => team.folderId ? String(f.id) === String(team.folderId) :
         team.aliases.some(alias => String(f.name).toLowerCase() === String(alias).toLowerCase())
       );
       return folder ? {
@@ -499,6 +508,34 @@ function markDriveItemComplete(teamKey, itemId) {
   if (!isWithinTeam_(itemId, team.id)) throw new Error('دسترسی به این آیتم مجاز نیست.');
   markProgress_(user.email, 'drive:' + itemId, 100);
   logActivity_(user.email, 'item_complete', itemId);
+  return ok_({});
+}
+
+/** عملیات فایل فقط برای مدیر و فقط در زیر درخت تیم مجاز است. */
+function adminUploadFile(teamKey, folderId, name, mime, encoded) {
+  const user = getUserContext(); requireRole_(user, ['admin']);
+  const team = getTeamFolderOrThrow_(user, String(teamKey));
+  const target = String(folderId || team.id);
+  if (!isWithinTeam_(target, team.id)) throw new Error('پوشه خارج از تیم است.');
+  name = String(name || '').trim(); mime = String(mime || 'application/octet-stream');
+  if (!name || name.length > 200 || /[\r\n]/.test(name) || mime.length > 200 || !/^[A-Za-z0-9+/]*={0,2}$/.test(String(encoded || '')) || encoded.length > 5600000) throw new Error('فایل نامعتبر یا بزرگ‌تر از ۴ مگابایت است.');
+  const bytes = Utilities.base64Decode(encoded);
+  if (bytes.length > 4 * 1024 * 1024) throw new Error('حداکثر اندازه فایل ۴ مگابایت است.');
+  const meta = Drive.Files.get(target, {fields:'mimeType', supportsAllDrives:true});
+  if (meta.mimeType !== 'application/vnd.google-apps.folder') throw new Error('مقصد پوشه نیست.');
+  const file = DriveApp.getFolderById(target).createFile(Utilities.newBlob(bytes, mime, name));
+  logActivity_(user.email, 'file_upload', teamKey + ': ' + name);
+  return ok_({id:file.getId()});
+}
+function adminTrashFile(teamKey, fileId) {
+  const user = getUserContext(); requireRole_(user, ['admin']);
+  const team = getTeamFolderOrThrow_(user, String(teamKey));
+  const id = String(fileId || '');
+  if (!id || id === team.id || !isWithinTeam_(id, team.id)) throw new Error('حذف این مورد مجاز نیست.');
+  const meta = Drive.Files.get(id, {fields:'name,mimeType', supportsAllDrives:true});
+  if (meta.mimeType === 'application/vnd.google-apps.folder') throw new Error('حذف پوشه در این نسخه پشتیبانی نمی‌شود.');
+  Drive.Files.update({trashed:true}, id, null, {supportsAllDrives:true});
+  logActivity_(user.email, 'file_trash', teamKey + ': ' + meta.name);
   return ok_({});
 }
 
@@ -1268,7 +1305,7 @@ function adminListUsers() {
     canManage: truthy_(u.CanManage), active: truthy_(u.Active), createdAt: u.CreatedAt,
     lastLogin: lastLogin[String(u.Email).toLowerCase()] || '', online: !!presence['presence:' + String(u.Email).toLowerCase()]
   }));
-  return ok_({ users: users, teams: TEAM_CONFIG.map(t => ({ key: t.key, name: t.name })) });
+  return ok_({ users: users, teams: teamConfigs_().map(t => ({ key: t.key, name: t.name })) });
 }
 
 function adminUpsertUser(payload) {
@@ -1281,7 +1318,7 @@ function adminUpsertUser(payload) {
   if (['admin', 'mentor', 'learner'].indexOf(String(payload.role)) === -1) throw new Error('نقش باید مدیر، منتور یا کارشناس باشد.');
   const role = normalizeRole_(payload.role);
   if (email === user.email && role !== 'admin') throw new Error('نمی‌توانید نقش خودتان را تغییر دهید.');
-  const teams = (payload.teams || []).filter(k => TEAM_CONFIG.some(t => t.key === k));
+  const teams = (payload.teams || []).filter(k => teamConfigs_().some(t => t.key === k));
   if (role === 'mentor' && (!teams.length || teams.length !== (payload.teams || []).length)) throw new Error('برای منتور حداقل یک تیم معتبر انتخاب کنید.');
   if (role === 'learner' && (teams.length !== 1 || (payload.teams || []).length !== 1)) throw new Error('برای هر کارشناس دقیقاً یک تیم معتبر انتخاب کنید.');
 
@@ -1343,8 +1380,8 @@ function adminTeamsStatus() {
   } catch (e) { error = e.message; }
   return ok_({
     rootName: rootName, error: error,
-    teams: TEAM_CONFIG.map(t => {
-      const f = folders.find(x => t.aliases.some(a => String(x.name).toLowerCase() === String(a).toLowerCase()));
+    teams: teamConfigs_().map(t => {
+      const f = folders.find(x => t.folderId ? String(x.id) === String(t.folderId) : t.aliases.some(a => String(x.name).toLowerCase() === String(a).toLowerCase()));
       return { key: t.key, name: t.name, found: !!f, folderId: f ? f.id : '' };
     })
   });
@@ -1370,7 +1407,7 @@ function adminListPaths(teamKey) {
       itemCount: items.filter(i => String(i.PathId) === String(p.PathId) && truthy_(i.Active)).length
     }));
   const quizzes = adminListQuizzes().quizzes;
-  return ok_({ paths: paths, teams: TEAM_CONFIG.filter(t => allowed.indexOf(t.key) !== -1), quizzes: quizzes });
+  return ok_({ paths: paths, teams: teamConfigs_().filter(t => allowed.indexOf(t.key) !== -1), quizzes: quizzes });
 }
 
 function adminSavePath(payload) {
@@ -1613,7 +1650,7 @@ function adminSaveQuiz(payload) {
   requireRole_(user, ['admin', 'team_manager']);
   if (!payload || !String(payload.title || '').trim()) throw new Error('عنوان آزمون الزامی است.');
   const teamKey = String(payload.teamKey || '');
-  if (!TEAM_CONFIG.some(t => t.key === teamKey) || !canManageTeam_(user, teamKey)) throw new Error('تیم آزمون معتبر نیست.');
+  if (!teamConfigs_().some(t => t.key === teamKey) || !canManageTeam_(user, teamKey)) throw new Error('تیم آزمون معتبر نیست.');
   const pass = Number(payload.passScore), minutes = Number(payload.timeLimitMin || 0), attempts = Number(payload.maxAttempts || 0);
   if (!Number.isFinite(pass) || pass < 1 || pass > 100 || !Number.isInteger(minutes) || minutes < 0 || minutes > 350 || !Number.isInteger(attempts) || attempts < 0) throw new Error('تنظیمات نمره، زمان یا تعداد تلاش نامعتبر است.');
   if (['always', 'after_pass', 'never'].indexOf(String(payload.showAnswers || 'after_pass')) === -1) throw new Error('تنظیم نمایش پاسخ نامعتبر است.');
@@ -1927,7 +1964,7 @@ function adminSaveAnnouncement(payload) {
   requireRole_(user, ['admin']);
   if (!payload || !String(payload.title || '').trim()) throw new Error('عنوان اعلان الزامی است.');
   const audience = String(payload.audience || 'all');
-  const valid = audience === 'all' || ['role:admin', 'role:learner'].indexOf(audience) !== -1 || TEAM_CONFIG.some(t => audience === 'team:' + t.key);
+  const valid = audience === 'all' || ['role:admin', 'role:learner'].indexOf(audience) !== -1 || teamConfigs_().some(t => audience === 'team:' + t.key);
   if (!valid || !String(payload.body || '').trim()) throw new Error('مخاطب یا متن اطلاعیه نامعتبر است.');
   const sh = sheet_('Announcements');
   const id = String(payload.id || '').trim();
@@ -1988,6 +2025,28 @@ function notifyPathCompletion_(email, pathId) {
   sheet_('Notifications').appendRow([newId_('NOTICE'), email, 'دوره آموزشی تکمیل شد', 'مسیر «' + String(path.Title) + '» برای شما تکمیل شد.', nowIso_(), String(pathId)]);
 }
 
+/** تیم جدید به همراه پوشه اختصاصی در ریشه؛ کلیدها پس از ثبت تغییر نمی‌کنند. */
+function adminCreateTeam(key, name) {
+  const user = getUserContext(); requireRole_(user, ['admin']);
+  key = String(key || '').trim().toLowerCase(); name = String(name || '').trim();
+  if (!/^[a-z0-9_-]{2,40}$/.test(key) || !name || name.length > 80 || /[\r\n]/.test(name)) throw new Error('کلید لاتین یا نام تیم نامعتبر است.');
+  const lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    if (teamConfigs_().some(t => t.key === key || t.name.toLowerCase() === name.toLowerCase())) throw new Error('کلید یا نام تیم تکراری است.');
+    const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
+    if (root.getFoldersByName(name).hasNext()) throw new Error('پوشه‌ای با این نام وجود دارد؛ نام دیگری انتخاب کنید.');
+    const folder = root.createFolder(name);
+    const props = PropertiesService.getScriptProperties();
+    const list = JSON.parse(props.getProperty('ACADEMY_EXTRA_TEAMS') || '[]');
+    list.push({key:key, name:name, folderId:folder.getId()});
+    try { props.setProperty('ACADEMY_EXTRA_TEAMS', JSON.stringify(list)); }
+    catch (e) { try { folder.setTrashed(true); } catch (_) {} throw e; }
+    cacheRemove_('team_folders_v1');
+    logActivity_(user.email, 'team_create', key + ': ' + name);
+    return ok_({key:key, folderId:folder.getId()});
+  } finally { lock.releaseLock(); }
+}
+
 
 // ===== Code.gs =====
 /*******************************************************
@@ -2041,7 +2100,7 @@ function provisionInitialAdmin_() {
     users.getRange(existing.__row, 3).setValue('admin');
     users.getRange(existing.__row, 6).setValue(true);
     users.getRange(existing.__row, 7).setValue(true);
-  } else users.appendRow([username, 'مدیر سامانه', 'admin', TEAM_CONFIG.map(t=>t.key).join(','), '', true, true, nowIso_()]);
+  } else users.appendRow([username, 'مدیر سامانه', 'admin', teamConfigs_().map(t=>t.key).join(','), '', true, true, nowIso_()]);
   props.deleteProperty('INITIAL_ADMIN_USERNAME'); props.deleteProperty('INITIAL_ADMIN_PASSWORD');
 }
 
@@ -2063,7 +2122,7 @@ function setupAcademy_() {
   if (usersSheet.getLastRow() < 2) {
     const owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase().trim();
     if (!owner) throw new Error('ایمیل مالک قابل تشخیص نیست؛ مدیر اولیه را در شیت Users ثبت کنید.');
-    usersSheet.appendRow([owner, owner, 'admin', TEAM_CONFIG.map(t => t.key).join(','), '', true, true, nowIso_()]);
+    usersSheet.appendRow([owner, owner, 'admin', teamConfigs_().map(t => t.key).join(','), '', true, true, nowIso_()]);
   }
 
 

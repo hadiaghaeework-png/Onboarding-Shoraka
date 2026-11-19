@@ -35,10 +35,10 @@ function findTeamFolders_(user) {
     }
     cachePut_(cacheKey, folders, 600);
   }
-  return TEAM_CONFIG
+  return teamConfigs_()
     .filter(team => allowedTeams_(user).indexOf(team.key) !== -1)
     .map(team => {
-      const folder = folders.find(f =>
+      const folder = folders.find(f => team.folderId ? String(f.id) === String(team.folderId) :
         team.aliases.some(alias => String(f.name).toLowerCase() === String(alias).toLowerCase())
       );
       return folder ? {
@@ -159,5 +159,33 @@ function markDriveItemComplete(teamKey, itemId) {
   if (!isWithinTeam_(itemId, team.id)) throw new Error('دسترسی به این آیتم مجاز نیست.');
   markProgress_(user.email, 'drive:' + itemId, 100);
   logActivity_(user.email, 'item_complete', itemId);
+  return ok_({});
+}
+
+/** عملیات فایل فقط برای مدیر و فقط در زیر درخت تیم مجاز است. */
+function adminUploadFile(teamKey, folderId, name, mime, encoded) {
+  const user = getUserContext(); requireRole_(user, ['admin']);
+  const team = getTeamFolderOrThrow_(user, String(teamKey));
+  const target = String(folderId || team.id);
+  if (!isWithinTeam_(target, team.id)) throw new Error('پوشه خارج از تیم است.');
+  name = String(name || '').trim(); mime = String(mime || 'application/octet-stream');
+  if (!name || name.length > 200 || /[\r\n]/.test(name) || mime.length > 200 || !/^[A-Za-z0-9+/]*={0,2}$/.test(String(encoded || '')) || encoded.length > 5600000) throw new Error('فایل نامعتبر یا بزرگ‌تر از ۴ مگابایت است.');
+  const bytes = Utilities.base64Decode(encoded);
+  if (bytes.length > 4 * 1024 * 1024) throw new Error('حداکثر اندازه فایل ۴ مگابایت است.');
+  const meta = Drive.Files.get(target, {fields:'mimeType', supportsAllDrives:true});
+  if (meta.mimeType !== 'application/vnd.google-apps.folder') throw new Error('مقصد پوشه نیست.');
+  const file = DriveApp.getFolderById(target).createFile(Utilities.newBlob(bytes, mime, name));
+  logActivity_(user.email, 'file_upload', teamKey + ': ' + name);
+  return ok_({id:file.getId()});
+}
+function adminTrashFile(teamKey, fileId) {
+  const user = getUserContext(); requireRole_(user, ['admin']);
+  const team = getTeamFolderOrThrow_(user, String(teamKey));
+  const id = String(fileId || '');
+  if (!id || id === team.id || !isWithinTeam_(id, team.id)) throw new Error('حذف این مورد مجاز نیست.');
+  const meta = Drive.Files.get(id, {fields:'name,mimeType', supportsAllDrives:true});
+  if (meta.mimeType === 'application/vnd.google-apps.folder') throw new Error('حذف پوشه در این نسخه پشتیبانی نمی‌شود.');
+  Drive.Files.update({trashed:true}, id, null, {supportsAllDrives:true});
+  logActivity_(user.email, 'file_trash', teamKey + ': ' + meta.name);
   return ok_({});
 }

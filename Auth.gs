@@ -25,8 +25,8 @@ function getUserContext() {
   const storedRole = String(u.Role || '').trim().toLowerCase();
   if (['admin', 'mentor', 'learner'].indexOf(storedRole) === -1) throw new Error('نقش حساب نامعتبر است.');
   const role = normalizeRole_(storedRole), teams = splitCsv_(u.Teams);
-  if (role === 'learner' && (teams.length !== 1 || !TEAM_CONFIG.some(t => t.key === teams[0]))) throw new Error('تیم این کارشناس باید دقیقاً یک تیم معتبر باشد.');
-  if (role === 'mentor' && (!teams.length || teams.some(t => !TEAM_CONFIG.some(x => x.key === t)))) throw new Error('تیم‌های منتور نامعتبر است.');
+  if (role === 'learner' && (teams.length !== 1 || !teamConfigs_().some(t => t.key === teams[0]))) throw new Error('تیم این کارشناس باید دقیقاً یک تیم معتبر باشد.');
+  if (role === 'mentor' && (!teams.length || teams.some(t => !teamConfigs_().some(x => x.key === t)))) throw new Error('تیم‌های منتور نامعتبر است.');
   return CURRENT_USER_CONTEXT_ = {email: username, name: String(u.Name || username), role: role, roleLabel: roleLabel_(role), teams: teams, canManage: role === 'admin', mentorEmail: String(u.MentorEmail || '').toLowerCase(), demo: false};
 }
 
@@ -106,7 +106,7 @@ function apiRequest(token, operation, args) {
   const endpoints = {
     getBootstrap, listMyPaths, getPath, markItemComplete, getLibraryPage, getItemDetail, markDriveItemComplete,
     getQuizForAttempt, submitQuiz, getMyTranscript, listAnnouncements, listNotifications, markNotificationRead,
-    adminListUsers, adminUpsertUser, adminSetUserActive, adminTeamsStatus, adminListPaths, adminSavePath, adminDeletePath,
+    adminListUsers, adminUpsertUser, adminSetUserActive, adminTeamsStatus, adminCreateTeam, adminUploadFile, adminTrashFile, adminListPaths, adminSavePath, adminDeletePath,
     adminPathItems, adminSavePathItem, adminDeletePathItem, adminDriveMeta, adminListQuizzes, adminGetQuiz, adminSaveQuiz,
     adminDeleteQuiz, adminSaveQuestion, adminDeleteQuestion, adminListAttempts, adminGetAttemptDetail, adminReviewAttempt,
     adminListAnnouncements, adminSaveAnnouncement, adminDeleteAnnouncement, reportSummary, reportTeamMembers, reportMember,
@@ -126,8 +126,8 @@ function requireRole_(user, roles) {
 
 /** تیم‌های مجاز این کاربر (admin همه تیم‌های پیکربندی‌شده را می‌بیند) */
 function allowedTeams_(user) {
-  if (user.role === 'admin') return TEAM_CONFIG.map(t => t.key);
-  return (user.teams || []).filter(k => TEAM_CONFIG.some(t => t.key === k));
+  if (user.role === 'admin') return teamConfigs_().map(t => t.key);
+  return (user.teams || []).filter(k => teamConfigs_().some(t => t.key === k));
 }
 
 function assertTeamAccess_(user, teamKey) {
@@ -144,7 +144,7 @@ function canManageTeam_(user, teamKey) {
 }
 
 function teamConfigByKey_(key) {
-  return TEAM_CONFIG.find(t => t.key === key) || null;
+  return teamConfigs_().find(t => t.key === key) || null;
 }
 
 /** آیا targetId (پوشه/فایل Drive) داخل teamRootId قرار دارد؟ حداکثر ۳۰ سطح بالاروی */
