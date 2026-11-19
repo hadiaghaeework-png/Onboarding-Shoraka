@@ -322,7 +322,7 @@ function adminGetQuiz(quizId) {
   const questions = questionsOf_(quizId).map(x => ({
     questionId: String(x.QuestionId), order: Number(x.Order || 0), type: String(x.Type),
     text: String(x.Text), options: parseJsonSafe_(x.OptionsJSON, []),
-    correct: parseJsonSafe_(x.CorrectJSON, []), points: Number(x.Points) || 1
+    correct: parseJsonSafe_(x.CorrectJSON, []), points: Number(x.Points) || 1, difficulty: String(x.Difficulty || ''), explanation: String(x.Explanation || ''), sourceLocation: String(x.SourceLocation || '')
   }));
   return ok_({
     quiz: {
@@ -438,6 +438,7 @@ function adminSaveQuestion(payload) {
   if (QUESTION_TYPES.indexOf(type) === -1) throw new Error('نوع سؤال نامعتبر است.');
   const text = String(payload.text || '').trim();
   if (!text) throw new Error('متن سؤال الزامی است.');
+  if ([text,payload.difficulty,payload.explanation,payload.sourceLocation].some(x => /^\s*[=]/.test(String(x || '')))) throw new Error('متن نباید با فرمول شروع شود.');
   const options = (payload.options || []).map(o => String(o)).filter(o => o.trim() !== '');
   const points = Math.max(0, Number(payload.points) || 1);
 
@@ -464,16 +465,17 @@ function adminSaveQuestion(payload) {
   }
   const finalOptions = type === 'tf' ? ['درست', 'غلط'] : options;
 
-  const sh = sheet_('Questions');
+  const sh = ensureQuestionMetadata_();
   const id = String(payload.questionId || '').trim();
   const row = [
     id || newId_('Q'), String(payload.quizId), Number(payload.order) || 0, type, text,
-    JSON.stringify(finalOptions), JSON.stringify(correct), points
+    JSON.stringify(finalOptions), JSON.stringify(correct), points,
+    String(payload.difficulty || '').trim(), String(payload.explanation || '').trim(), String(payload.sourceLocation || '').trim()
   ];
   if (id) {
     const values = sh.getDataRange().getValues();
     for (let i = 1; i < values.length; i++) {
-      if (String(values[i][0]) === id) { sh.getRange(i + 1, 1, 1, row.length).setValues([row]); return ok_({ questionId: id }); }
+      if (String(values[i][0]) === id) { if (String(values[i][1]) !== String(payload.quizId)) throw new Error('سؤال متعلق به این آزمون نیست.'); sh.getRange(i + 1, 1, 1, row.length).setValues([row]); return ok_({ questionId: id }); }
     }
     throw new Error('سؤال پیدا نشد.');
   }
@@ -808,4 +810,66 @@ function adminImportUsers(filename, encoded) {
     } catch (e) { results.push({row:i+2, username:username, ok:false, error:String(e.message || e)}); }
   });
   return ok_({results:results});
+}
+
+/** افزودن صرفاً ستون‌های جدید با بررسی سرستون‌های موجود، بدون بازنویسی داده قدیمی. */
+function ensureQuestionMetadata_() {
+  const sh = sheet_('Questions');
+  if (sh.getMaxColumns() < 11) sh.insertColumnsAfter(sh.getMaxColumns(), 11 - sh.getMaxColumns());
+  const headers = sh.getRange(1, 1, 1, 11).getValues()[0];
+  const expected = SHEET_DEFS.Questions;
+  if (expected.some((x, i) => (i < 8 && String(headers[i]) !== x) || (i >= 8 && headers[i] && String(headers[i]) !== x))) throw new Error('ستون‌های شیت Questions با نسخه مورد انتظار سازگار نیست.');
+  if (expected.slice(8).some((x,i) => !headers[i+8])) sh.getRange(1,9,1,3).setValues([expected.slice(8)]);
+  return sh;
+}
+
+/** ورود ده سؤال تأییدشده در یک آزمون متصل به یک فایل، بدون تولید خودکار یا جایگزینی داده قبلی. */
+function adminImportQuestions(quizId, filename, encoded) {
+  const user = getUserContext(); requireRole_(user, ['admin']);
+  const name = String(filename || '').toLowerCase(), data = String(encoded || '');
+  if (!/\.(xlsx|csv)$/.test(name) || !data || data.length > 1400000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw new Error('فقط CSV یا XLSX تا یک مگابایت مجاز است.');
+  const bytes = Utilities.base64Decode(data);
+  if (bytes.length > 1024*1024) throw new Error('فایل بزرگ‌تر از یک مگابایت است.');
+  let table;
+  if (/\.csv$/.test(name)) table = Utilities.parseCsv(Utilities.newBlob(bytes).getDataAsString('UTF-8').replace(/^\uFEFF/, ''));
+  else {
+    let id = '';
+    try {
+      const blob = Utilities.newBlob(bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'academy-questions.xlsx');
+      id = Drive.Files.create({name:'academy-temporary-question-import',mimeType:'application/vnd.google-apps.spreadsheet'},blob,{fields:'id'}).id;
+      const sh = SpreadsheetApp.openById(id).getSheets()[0];
+      if (sh.getLastRow() > 11 || sh.getLastColumn() > 20) throw new Error('فایل باید دقیقاً ده سؤال داشته باشد.');
+      table = sh.getDataRange().getDisplayValues();
+    } finally { if (id) Drive.Files.remove(id); }
+  }
+  const headers = ['source_file_id','question','option_1','option_2','option_3','option_4','correct_option','difficulty','explanation','source_location'];
+  if (!table || table.length !== 11 || headers.some((x,i)=>String((table[0]||[])[i] || '').trim().toLowerCase() !== x)) throw new Error('فایل باید سرستون‌های قالب و دقیقاً ده سؤال داشته باشد.');
+  const normalized = [], seen = {};
+  table.slice(1).forEach((r,i) => {
+    const vals = headers.map((_,j)=>String(r[j] || '').trim());
+    if (vals.some(x=>x.length>4000 || /^\s*=/.test(x))) throw new Error('ردیف '+(i+2)+': مقدار بسیار طولانی یا فرمول مجاز نیست.');
+    const answer = Number(vals[6]);
+    if (!vals[0] || !vals[1] || vals.slice(2,6).some(x=>!x) || !Number.isInteger(answer) || answer < 1 || answer > 4 || !vals[7] || !vals[8] || !vals[9]) throw new Error('ردیف '+(i+2)+': همه فیلدها و پاسخ بین ۱ تا ۴ الزامی است.');
+    const key = vals[1].replace(/\s+/g,' ').toLowerCase();
+    if (seen[key]) throw new Error('ردیف '+(i+2)+': سؤال تکراری است.');
+    seen[key] = true; normalized.push(vals);
+  });
+  const lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    const quiz = getQuizRow_(String(quizId));
+    if (!quiz || !/^(drive|item)$/i.test(String(quiz.RefType)) || !quiz.RefId) throw new Error('ابتدا آزمون متصل به فایل Drive بسازید.');
+    assertQuizManageScope_(user, quiz);
+    const team = getTeamFolderOrThrow_(user, String(quiz.TeamKey));
+    if (!isWithinTeam_(String(quiz.RefId), team.id)) throw new Error('فایل آزمون در پوشه تیم نیست.');
+    const meta = Drive.Files.get(String(quiz.RefId), {fields:'mimeType,trashed', supportsAllDrives:true});
+    if (meta.trashed || meta.mimeType === 'application/vnd.google-apps.folder') throw new Error('منبع باید فایل فعال باشد، نه پوشه.');
+    if (normalized.some(r => parseDriveId_(r[0]) !== String(quiz.RefId))) throw new Error('شناسه منبع همه ردیف‌ها باید با فایل آزمون یکی باشد.');
+    if (rows_('Attempts').some(a=>String(a.QuizId) === String(quizId))) throw new Error('برای آزمونی که تلاش دارد ورود سؤال مجاز نیست.');
+    if (questionsOf_(quizId).length) throw new Error('برای جلوگیری از تکرار، آزمون باید بدون سؤال باشد.');
+    const sh = ensureQuestionMetadata_();
+    const out = normalized.map((r,i)=>[newId_('Q'), String(quizId), i+1, 'mcq', r[1], JSON.stringify(r.slice(2,6)), JSON.stringify([Number(r[6])-1]), 1, r[7], r[8], r[9]]);
+    sh.getRange(sh.getLastRow()+1,1,out.length,11).setValues(out);
+    logActivity_(user.email,'quiz_question_import',String(quizId));
+    return ok_({count:out.length});
+  } finally { lock.releaseLock(); }
 }

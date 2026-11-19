@@ -108,7 +108,7 @@ function apiRequest(token, operation, args) {
     getQuizForAttempt, submitQuiz, getMyTranscript, listAnnouncements, listNotifications, markNotificationRead,
     adminListUsers, adminUpsertUser, adminSetUserActive, adminTeamsStatus, adminImportUsers, adminCreateTeam, adminUploadFile, adminTrashFile, adminListPaths, adminSavePath, adminDeletePath,
     adminPathItems, adminSavePathItem, adminDeletePathItem, adminDriveMeta, adminListQuizzes, adminGetQuiz, adminSaveQuiz,
-    adminDeleteQuiz, adminSaveQuestion, adminDeleteQuestion, adminListAttempts, adminGetAttemptDetail, adminReviewAttempt,
+    adminDeleteQuiz, adminSaveQuestion, adminDeleteQuestion, adminImportQuestions, adminListAttempts, adminGetAttemptDetail, adminReviewAttempt,
     adminListAnnouncements, adminSaveAnnouncement, adminDeleteAnnouncement, reportSummary, reportTeamMembers, reportMember,
     reportIncomplete, reportExportCsv, reportMemberFiles, addMentorNote, presencePing
   };

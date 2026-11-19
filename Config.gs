@@ -27,7 +27,7 @@ const SHEET_DEFS = {
   PathItems:    ['ItemId', 'PathId', 'Order', 'Title', 'DriveItemId', 'ItemType', 'Required', 'QuizId', 'EstimatedMin', 'Active'],
   Progress:     ['Email', 'PathItemId', 'Status', 'CompletedAt', 'Score'],
   Quizzes:      ['QuizId', 'RefType', 'RefId', 'Title', 'Description', 'PassScore', 'TimeLimitMin', 'MaxAttempts', 'ShuffleQuestions', 'ShuffleOptions', 'ShowAnswers', 'Active', 'CreatedAt', 'TeamKey'],
-  Questions:    ['QuestionId', 'QuizId', 'Order', 'Type', 'Text', 'OptionsJSON', 'CorrectJSON', 'Points'],
+  Questions:    ['QuestionId', 'QuizId', 'Order', 'Type', 'Text', 'OptionsJSON', 'CorrectJSON', 'Points', 'Difficulty', 'Explanation', 'SourceLocation'],
   Attempts:     ['AttemptId', 'Timestamp', 'Email', 'QuizId', 'Score', 'Passed', 'Status', 'AnswersJSON', 'Feedback', 'TimeSpentSec'],
   Announcements:['Id', 'Title', 'Body', 'Audience', 'Active', 'CreatedAt'],
   Activity:     ['Id', 'Timestamp', 'Email', 'Action', 'Detail'],

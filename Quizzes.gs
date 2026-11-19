@@ -184,7 +184,7 @@ function submitQuiz_(quizId, answers, timeSpentSec, attemptToken) {
     const points = Number(question.Points) || 1;
     const correct = parseJsonSafe_(question.CorrectJSON, []);
     const given = ansMap[qid];
-    const item = { questionId: qid, type: type, points: points, correct: correct, given: (given === undefined ? null : given), isCorrect: null, awarded: 0 };
+    const item = { questionId: qid, type: type, points: points, correct: correct, explanation: String(question.Explanation || ''), sourceLocation: String(question.SourceLocation || ''), given: (given === undefined ? null : given), isCorrect: null, awarded: 0 };
     if (type === 'essay') {
       item.isCorrect = null; // نیازمند بازبینی
     } else if (type === 'multi') {
@@ -241,7 +241,7 @@ function submitQuiz_(quizId, answers, timeSpentSec, attemptToken) {
     maxAttempts: maxAttempts,
     review: reveal ? review.map(r => ({
       questionId: r.questionId, given: r.given, correct: r.correct,
-      isCorrect: r.isCorrect, awarded: r.awarded, points: r.points
+      isCorrect: r.isCorrect, awarded: r.awarded, points: r.points, explanation: r.explanation, sourceLocation: r.sourceLocation
     })) : null
   });
 }

@@ -409,6 +409,7 @@ const App = (() => {
       reqId: 0
     };
     const teams = state.teams || [];
+    lib._selectFile = opts.selectFile || null;
 
     let html = '<div class="library-toolbar">';
     if (!embedded) {
@@ -418,7 +419,7 @@ const App = (() => {
     }
     html += '<input class="filter" id="libSearch" type="search" placeholder="جست‌وجو در این پوشه…" style="min-width:180px" aria-label="جست‌وجو">'
       + '<select class="filter" id="libType" aria-label="فیلتر نوع"><option value="all">همه موارد</option><option value="folder">فقط پوشه‌ها</option><option value="file">فقط فایل‌ها</option></select>'
-      + (state.user.role === 'admin' ? '<label class="btn btn-primary btn-sm">آپلود فایل <input id="libUpload" type="file" hidden></label>' : '')
+      + (!opts.selectFile && state.user.role === 'admin' ? '<label class="btn btn-primary btn-sm">آپلود فایل <input id="libUpload" type="file" hidden></label>' : '')
       + '<span class="hint" id="libCount" style="margin-inline-start:auto"></span>'
       + '</div>'
       + '<nav class="crumbs" id="libCrumbs" aria-label="مسیر پوشه"></nav>'
@@ -463,7 +464,7 @@ const App = (() => {
         $('#libPrev', mount).disabled = lib.page <= 1;
         $('#libNext', mount).disabled = !lib.nextToken;
         if (!items.length) { itemsEl.innerHTML = emptyHTML('🔍', 'محتوایی پیدا نشد', lib.search ? 'عبارت جست‌وجو را تغییر دهید.' : 'این پوشه خالی است.'); return; }
-        itemsEl.innerHTML = items.map(renderItemCard).join('');
+        itemsEl.innerHTML = items.map(item => renderItemCard(item, !!lib._selectFile)).join('');
         $$('.item', itemsEl).forEach(card => wireItemCard(card, lib));
       } catch (err) {
         if (reqId !== lib.reqId) return;
@@ -492,7 +493,7 @@ const App = (() => {
     load();
     return lib;
   }
-  function renderItemCard(item) {
+  function renderItemCard(item, selectMode) {
     const isFolder = item.kind === 'folder';
     const quiz = item.quiz && item.quiz.available;
     const done = item.status === 'completed';
@@ -504,9 +505,9 @@ const App = (() => {
       + (!isFolder ? '<div class="hint">پیشرفت مطالعه: ' + (done ? '۱۰۰٪' : '۰٪') + '</div>' + progressHTML(done ? 100 : 0) : '')
       + '<small>' + (isFolder ? 'ورود به محتوای پوشه' : esc(item.size || 'فایل آموزشی')) + (item.modified ? ' • ' + fmtDate(item.modified) : '') + '</small>'
       + '<div class="item-actions">'
-      + (isFolder ? '<button class="btn btn-navy btn-sm" data-act="open">مشاهده پوشه</button>' : '<button class="btn btn-soft btn-sm" data-act="preview">پیش‌نمایش</button>')
-      + (quiz ? '<button class="btn btn-primary btn-sm" data-act="quiz">شروع آزمون</button>' : '')
-      + (state.user.role === 'admin' && !isFolder ? '<button class="btn btn-danger btn-sm" data-act="trash">حذف</button>' : '')
+      + (isFolder ? '<button class="btn btn-navy btn-sm" data-act="open">مشاهده پوشه</button>' : selectMode ? '<button class="btn btn-primary btn-sm" data-act="choose">انتخاب فایل</button>' : '<button class="btn btn-soft btn-sm" data-act="preview">پیش‌نمایش</button>')
+      + (!selectMode && quiz ? '<button class="btn btn-primary btn-sm" data-act="quiz">شروع آزمون</button>' : '')
+      + (!selectMode && state.user.role === 'admin' && !isFolder ? '<button class="btn btn-danger btn-sm" data-act="trash">حذف</button>' : '')
       + '</div></article>';
   }
   function wireItemCard(card, lib) {
@@ -516,6 +517,8 @@ const App = (() => {
       if (name === 'open') {
         lib.folderStack.push({ id: d.id, name: d.name });
         reload();
+      } else if (name === 'choose' && lib._selectFile) {
+        lib._selectFile(d.id, d.name);
       } else if (name === 'preview') {
         openItemPreview(d, lib);
       } else if (name === 'trash') {
@@ -906,7 +909,7 @@ const App = (() => {
           const options = optionObjs(q);
           const labels = ids => (Array.isArray(ids) ? ids : [ids]).map(id => { const o = options.find(x => Number(x.index) === Number(id)); return o ? o.text : ''; }).filter(Boolean).join('، ') || '—';
           const answerDetail = rv.isCorrect === null ? '' : '<div class="hint">پاسخ شما: ' + esc(labels(rv.given)) + ' • پاسخ صحیح: ' + esc(labels(rv.correct)) + '</div>';
-          return '<div class="review-item ' + cls + '"><strong>' + icon + ' ' + esc(q.text || rv.questionId) + '</strong><div class="hint" style="margin-top:4px">' + (rv.isCorrect === null ? 'نیازمند بازبینی — ' + fmtNum(rv.points) + ' نمره' : (rv.isCorrect ? 'درست' : 'نادرست') + ' — امتیاز: ' + fmtNum(rv.awarded) + ' از ' + fmtNum(rv.points)) + '</div>' + answerDetail + '</div>';
+          return '<div class="review-item ' + cls + '"><strong>' + icon + ' ' + esc(q.text || rv.questionId) + '</strong><div class="hint" style="margin-top:4px">' + (rv.isCorrect === null ? 'نیازمند بازبینی — ' + fmtNum(rv.points) + ' نمره' : (rv.isCorrect ? 'درست' : 'نادرست') + ' — امتیاز: ' + fmtNum(rv.awarded) + ' از ' + fmtNum(rv.points)) + '</div>' + answerDetail + (rv.explanation ? '<div class="hint">توضیح: ' + esc(rv.explanation) + '</div>' : '') + (rv.sourceLocation ? '<div class="hint">مستند: ' + esc(rv.sourceLocation) + '</div>' : '') + '</div>';
         }).join('')
         + '</div>';
     } else if (!pending) {
@@ -914,7 +917,7 @@ const App = (() => {
     }
     html += '</div>';
     const attemptsLeft = s.meta.maxAttempts ? s.meta.maxAttempts - r.attemptsUsed : Infinity;
-    const foot = (!pass && !pending && attemptsLeft > 0 ? '<button class="btn btn-navy" id="retryQuizBtn">تلاش مجدد (' + fmtNum(attemptsLeft) + ' تلاش باقی‌مانده)</button>' : '')
+    const foot = (!pass && !pending && attemptsLeft > 0 ? '<button class="btn btn-navy" id="retryQuizBtn">تلاش مجدد' + (Number.isFinite(attemptsLeft) ? ' (' + fmtNum(attemptsLeft) + ' تلاش باقی‌مانده)' : '') + '</button>' : '')
       + '<button class="btn btn-primary" id="finishQuizBtn">بستن</button>';
     openModal({
       title: 'نتیجه آزمون', size: 'lg', bodyHTML: html, footHTML: foot,
@@ -1083,7 +1086,7 @@ const App = (() => {
     openModal, closeModal, confirmModal, toast,
     esc, fmtDate, fmtDateTime, fmtNum,
     progressHTML, loadingHTML, errorHTML, emptyHTML, statCard,
-    isDemo, refreshBadges, startQuiz
+    isDemo, refreshBadges, startQuiz, renderLibraryBrowser
   };
   window.App = { go: function () { return go.apply(null, arguments); } };
 
