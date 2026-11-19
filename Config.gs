@@ -2,7 +2,7 @@
    استقرار آزمایشی با اجرای مالک و محدودیت دامنه، تنها پس از تأیید هویت Workspace. */
 
 const CONFIG = {
-  ROOT_FOLDER_ID: '14or5GdiS6QoRbq3fIQWW-Yf0y8s2bUJ8',
+  ROOT_FOLDER_ID: 'PUT_YOUR_DRIVE_FOLDER_ID_HERE',
   PAGE_SIZE: 12,
   SPREADSHEET_ID: '',                 // خالی = همان فایل ساخته‌شده توسط setupAcademy در Script Properties
   ORG_NAME: 'بیمه‌بازار',

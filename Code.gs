@@ -15,9 +15,24 @@ function include_(filename) {
 }
 
 /**
- * ساخت/ترمیم ساختار داده‌ها — یک‌بار اجرا کنید.
- * شیت‌ها را می‌سازد، سرستون‌ها را تصحیح می‌کند و آزمون نمونه را (در صورت نبود) اضافه می‌کند.
+ * اجرای اولیه توسط مالک از ویرایشگر. این تابع در فهرست Run نمایش داده می‌شود.
+ * از آنجا که توابع عمومی از مرورگر هم قابل فراخوانی‌اند، هویت مالک کنترل می‌شود.
  */
+function setupAcademy() {
+  const active = String(Session.getActiveUser().getEmail() || '').toLowerCase().trim();
+  const owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase().trim();
+  if (!active || !owner || active !== owner) throw new Error('فقط مالک پروژه می‌تواند راه‌اندازی را اجرا کند؛ هویت مالک قابل تأیید نیست.');
+  if (!CONFIG.ROOT_FOLDER_ID || CONFIG.ROOT_FOLDER_ID === 'PUT_YOUR_DRIVE_FOLDER_ID_HERE') throw new Error('ابتدا شناسه پوشه اصلی Drive را در ROOT_FOLDER_ID تنظیم کنید.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const result = setupAcademy_();
+    Logger.log('راه‌اندازی انجام شد. فایل داده: ' + result.spreadsheetUrl);
+    return result;
+  } finally { lock.releaseLock(); }
+}
+
+/** ساخت ساختار شیت‌ها، بدون درج داده آزمایشی. */
 function setupAcademy_() {
   let ss;
   const existing = CONFIG.SPREADSHEET_ID ||
@@ -25,7 +40,8 @@ function setupAcademy_() {
   if (existing) {
     ss = SpreadsheetApp.openById(existing);
   } else {
-    ss = SpreadsheetApp.create('داده‌های آکادمی یادگیری بیمه‌بازار');
+    // در اسکریپت متصل به Sheet از همان فایل استفاده می‌کنیم؛ در پروژه مستقل فایل جدید ساخته می‌شود.
+    ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.create('داده‌های آکادمی یادگیری بیمه‌بازار');
   }
 
   PropertiesService.getScriptProperties().setProperty('ACADEMY_SPREADSHEET_ID', ss.getId());
