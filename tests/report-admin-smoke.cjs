@@ -1,0 +1,9 @@
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+let user={email:'admin',role:'admin',teams:[]};
+const data={Users:[{Email:'agent',Role:'learner',Teams:'a',Active:true},{Email:'mentor',Role:'mentor',Teams:'a',Active:true},{Email:'other',Role:'learner',Teams:'b',Active:true}],Paths:[{PathId:'p',TeamKey:'a',Active:true}],PathItems:[{PathId:'p',ItemId:'i',QuizId:'q',Active:true}],Progress:[{Email:'agent',PathItemId:'item:i',Status:'in_progress'}],Quizzes:[{QuizId:'q',TeamKey:'a'},{QuizId:'q2',TeamKey:'b'}],Attempts:[{Email:'agent',QuizId:'q',Score:80,Status:'graded'},{Email:'agent',QuizId:'q2',Score:20,Status:'graded'}]};
+const ctx={rows_:n=>data[n]||[],getUserContext:()=>user,truthy_:x=>x===true,normalizeRole_:x=>x,splitCsv_:s=>String(s||'').split(',').filter(Boolean),ok_:x=>x,allowedTeams_:u=>u.role==='admin'?['a','b']:u.teams,requireRole_:(u,roles)=>{if(!roles.includes(u.role))throw Error('denied')},assertTeamAccess_:(u,t)=>{if(!(u.role==='admin'||u.teams.includes(t)))throw Error('denied')},teamConfigByKey_:k=>({name:k}),getMyProgressMap_:()=>({}),itemsOfPath_:()=>[],console};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync('Reports.gs','utf8'),ctx);
+let r=ctx.reportSummary('a');assert.equal(r.teams[0].members,1);assert.equal(r.teams[0].avgCompletion,0);assert.equal(r.teams[0].avgScore,80);assert.equal(r.teams[0].attempts,1);
+data.Progress[0].Status='completed';assert.equal(ctx.reportSummary('a').teams[0].avgCompletion,100);
+user={email:'agent',role:'learner',teams:['a']};assert.throws(()=>ctx.reportSummary('a'),/denied/);assert.throws(()=>ctx.reportTeamMembers('b'),/denied/);
+console.log('Admin reports aggregation and authorization passed (mocked GAS).');

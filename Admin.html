@@ -74,7 +74,6 @@ window.Admin = (() => {
       const teams = resp.teams || [], totals = resp.totals || {};
       let html = '<div class="stats" style="margin-bottom:16px">'
         + A.statCard('accent', '👥', 'اعضای فعال', A.fmtNum(totals.members), 'در تیم‌های مجاز شما')
-        + A.statCard('gold', '▣', 'تلاش‌های آزمون', A.fmtNum(totals.attempts), 'مجموع تلاش‌ها')
         + A.statCard('ok', '★', 'میانگین نمره', A.fmtNum(totals.avgScore) + '٪', 'در همه تیم‌ها')
         + A.statCard('warn', '✎', 'در انتظار بازبینی', A.fmtNum(totals.pendingReview), 'نیازمند اقدام منتور/مدیر')
         + '</div>';
@@ -82,13 +81,13 @@ window.Admin = (() => {
       html += '<div class="grid-2"><div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>میانگین پیشرفت تیم‌ها (%)</h3></div>'
         + teams.map(t => '<div class="bar-row"><span>تیم ' + A.esc(t.name) + '</span><div class="bar-track"><div class="bar-fill" style="width:' + t.avgCompletion + '%">' + A.fmtNum(t.avgCompletion) + '٪</div></div><span>' + A.fmtNum(t.members) + ' عضو</span></div>').join('')
         + '</div><div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>میانگین نمره آزمون (%)</h3></div>'
-        + teams.map(t => '<div class="bar-row"><span>تیم ' + A.esc(t.name) + '</span><div class="bar-track"><div class="bar-fill" style="width:' + t.avgScore + '%">' + A.fmtNum(t.avgScore) + '٪</div></div><span>' + A.fmtNum(t.attempts) + ' تلاش</span></div>').join('')
+        + teams.map(t => '<div class="bar-row"><span>تیم ' + A.esc(t.name) + '</span><div class="bar-track"><div class="bar-fill" style="width:' + t.avgScore + '%">' + (t.scoredAttempts ? A.fmtNum(t.avgScore) + '٪' : 'آزمون نداده') + '</div></div><span>' + A.fmtNum(t.attempts) + ' تلاش</span></div>').join('')
         + '</div></div>';
 
       html += '<div class="panel" style="margin-top:16px"><div class="section-head" style="margin:0 0 12px"><h3>خلاصه تیم‌ها</h3>'
         + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-soft btn-sm" id="csvSummary">⬇ خروجی Excel (خلاصه تیم‌ها)</button><button class="btn btn-soft btn-sm" id="csvProgress">⬇ خروجی Excel (پیشرفت اعضا)</button></div>'
         + '</div><div class="table-wrap"><table class="data"><thead><tr><th>تیم</th><th>اعضا</th><th>میانگین تکمیل</th><th>تکمیل‌شده کامل</th><th>تلاش آزمون</th><th>میانگین نمره</th><th>قبول</th><th>بازبینی</th></tr></thead><tbody>'
-        + teams.map(t => '<tr style="cursor:pointer" data-drilldown="' + A.esc(t.key) + '" title="مشاهده اعضا"><td><strong>تیم ' + A.esc(t.name) + '</strong></td><td>' + A.fmtNum(t.members) + '</td><td>' + A.fmtNum(t.avgCompletion) + '٪</td><td>' + A.fmtNum(t.completedMembers) + '</td><td>' + A.fmtNum(t.attempts) + '</td><td>' + A.fmtNum(t.avgScore) + '٪</td><td>' + A.fmtNum(t.passedAttempts) + '</td><td>' + A.fmtNum(t.pendingReview) + '</td></tr>').join('')
+        + teams.map(t => '<tr style="cursor:pointer" data-drilldown="' + A.esc(t.key) + '" title="مشاهده اعضا"><td><strong>تیم ' + A.esc(t.name) + '</strong></td><td>' + A.fmtNum(t.members) + '</td><td>' + A.fmtNum(t.avgCompletion) + '٪</td><td>' + A.fmtNum(t.completedMembers) + '</td><td>' + A.fmtNum(t.attempts) + '</td><td>' + (t.scoredAttempts ? A.fmtNum(t.avgScore) + '٪' : 'آزمون نداده') + '</td><td>' + A.fmtNum(t.passedAttempts) + '</td><td>' + A.fmtNum(t.pendingReview) + '</td></tr>').join('')
         + '</tbody></table></div><div id="drilldown" style="margin-top:16px"></div></div>';
 
       body.innerHTML = html;
@@ -104,7 +103,7 @@ window.Admin = (() => {
       const members = resp.members || [];
       mount.innerHTML = '<h4 style="margin:0 0 8px;font-size:13px">اعضای تیم — برای مشاهده کارنامه کامل و ثبت بازخورد، روی نام کلیک کنید</h4>'
         + (members.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>نام</th><th>ایمیل</th><th>پیشرفت</th><th>تلاش‌ها</th><th>میانگین نمره</th><th>آخرین فعالیت</th></tr></thead><tbody>'
-          + members.map(m => '<tr style="cursor:pointer" data-member="' + A.esc(m.email) + '"><td><strong>' + A.esc(m.name) + '</strong></td><td class="hint">' + A.esc(m.email) + '</td><td><div class="progress-bar" style="min-width:120px"><div class="progress-fill" style="width:' + m.completion + '%"></div></div><span class="hint">' + A.fmtNum(m.completion) + '٪ (' + A.fmtNum(m.itemsDone) + '/' + A.fmtNum(m.itemsTotal) + ')</span></td><td>' + A.fmtNum(m.attempts) + '</td><td>' + A.fmtNum(m.avgScore) + '٪</td><td class="hint">' + A.fmtDateTime(m.lastActivity) + '</td></tr>').join('')
+          + members.map(m => '<tr style="cursor:pointer" data-member="' + A.esc(m.email) + '"><td><strong>' + A.esc(m.name) + '</strong></td><td class="hint">' + A.esc(m.email) + '</td><td><div class="progress-bar" style="min-width:120px"><div class="progress-fill" style="width:' + m.completion + '%"></div></div><span class="hint">' + A.fmtNum(m.completion) + '٪ (' + A.fmtNum(m.itemsDone) + '/' + A.fmtNum(m.itemsTotal) + ')</span></td><td>' + A.fmtNum(m.attempts) + '</td><td>' + (m.scoredAttempts ? A.fmtNum(m.avgScore) + '٪' : 'آزمون نداده') + '</td><td class="hint">' + A.fmtDateTime(m.lastActivity) + '</td></tr>').join('')
           + '</tbody></table></div>' : A.emptyHTML('👥', 'عضوی در این تیم ثبت نشده است', ''));
       mount.querySelectorAll('[data-member]').forEach(row => row.addEventListener('click', () => openMemberModal(A, row.getAttribute('data-member'))));
     }).catch(err => { mount.innerHTML = A.errorHTML(err.message, true); });
@@ -123,6 +122,8 @@ window.Admin = (() => {
 
       html += '<h4 style="font-size:13px;margin:14px 0 8px">پیشرفت در مسیرها</h4>';
       html += paths.length ? paths.map(p => '<div class="pstep-meta" style="display:flex;justify-content:space-between;gap:10px;margin:6px 0"><span>' + A.esc(p.title) + '</span><span>' + A.fmtNum(p.percent) + '٪ (' + A.fmtNum(p.done) + '/' + A.fmtNum(p.total) + ')</span></div>' + A.progressHTML(p.percent)).join('') : '<p class="hint">مسیری برای این عضو تعریف نشده است.</p>';
+
+      html += '<h4 style="font-size:13px;margin:16px 0 8px">جزئیات مراحل ثبت‌شده</h4>' + paths.map(p => '<div><strong>' + A.esc(p.title) + '</strong>' + (p.items || []).map(item => '<div class="hint">' + (item.done ? '✓ تکمیل‌شده — ' : '○ تکمیل‌نشده — ') + A.esc(item.title) + '</div>').join('') + '</div>').join('');
 
       html += '<h4 style="font-size:13px;margin:16px 0 8px">تلاش‌های آزمون (' + A.fmtNum(attempts.length) + ')</h4>';
       html += attempts.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>آزمون</th><th>تاریخ</th><th>نمره</th><th>نتیجه</th></tr></thead><tbody>'
@@ -277,6 +278,6 @@ window.Admin = (() => {
   }
 
   const TAB_RENDERERS = { reports: renderReports, incomplete: renderIncomplete, users: renderUsers, content: renderContent, quizzes: window.AdminQuiz.render, review: window.AdminQuiz.review, announcements: renderAnnouncements };
-  return { render: render };
+  return { render: render, openTeamReport: function(A, teamKey) { A.openModal({title: 'وضعیت اعضای تیم', size: 'xl', bodyHTML: '<div id="teamReportDetails"></div>'}); renderMembersDrilldown(document.querySelector('#teamReportDetails'), A, teamKey); } };
 })();
 </script>

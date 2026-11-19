@@ -183,6 +183,7 @@ const App = (() => {
     paintChrome(b);
 
     const u = b.user, s = b.stats;
+    if (u.role === 'admin') return renderAdminDashboard(b);
     const active = b.activePaths || [];
     const ann = b.announcements || [];
     const recent = b.recentActivity || [];
@@ -259,6 +260,19 @@ const App = (() => {
     bindDashboardActions(active);
     return;
   };
+
+  async function renderAdminDashboard(b) {
+    const report = await callServer('reportSummary', '');
+    if (state.view !== 'dashboard') return;
+    const teams = report.teams || [], recent = b.recentActivity || [], ann = b.announcements || [];
+    let html = '<section class="hero"><img class="hero-watermark" src="' + BRAND.mark + '" alt=""><div class="hero-content"><span class="hero-kicker">مدیریت آکادمی</span><h2>سلام ' + esc(String(b.user.name || b.user.email).split(' ')[0]) + ' 👋</h2><p>نمای کلی آموزش کارشناسان؛ برای جزئیات هر تیم روی آن کلیک کنید.</p></div></section>';
+    if (b.drive && b.drive.error) html += '<div class="error-box">خطا در اتصال Drive: ' + esc(b.drive.error) + '</div>';
+    html += '<section class="stats">' + statCard('gold','👥','کارشناسان فعال',fmtNum(report.totals.members),'بر اساس نام کاربری') + statCard('ok','★','میانگین نمره',fmtNum(report.totals.avgScore)+'٪','تلاش‌های دارای نمره') + '</section>';
+    html += '<section class="panel"><div class="section-head"><h3>پیشرفت و نمره تیم‌ها</h3></div><div class="table-wrap"><table class="data"><thead><tr><th>تیم</th><th>کارشناسان فعال</th><th>میانگین پیشرفت مراحل</th><th>میانگین نمره</th><th></th></tr></thead><tbody>' + teams.map(t => '<tr><td>' + esc(t.name) + '</td><td>' + fmtNum(t.members) + '</td><td>' + fmtNum(t.avgCompletion) + '٪</td><td>' + (t.scoredAttempts ? fmtNum(t.avgScore) + '٪' : 'آزمون نداده') + '</td><td><button class="btn btn-soft btn-sm" data-admin-team="' + esc(t.key) + '">جزئیات</button></td></tr>').join('') + '</tbody></table></div></section>';
+    html += '<div class="grid-2"><section class="panel"><div class="section-head"><h3>فعالیت‌های اخیر مدیر</h3></div>' + (recent.length ? '<div class="activity">' + recent.map(a => '<div class="activity-row"><time>' + fmtDateTime(a.timestamp) + '</time><span>' + esc(ACTION_LABELS[a.action] || a.action) + (a.detail ? ' — ' + esc(a.detail) : '') + '</span></div>').join('') + '</div>' : '<p class="hint">فعالیتی ثبت نشده است.</p>') + '</section><section class="panel"><div class="section-head"><h3>اطلاعیه‌ها</h3></div>' + (ann.length ? ann.map(a => '<div class="ann-item"><div><h5>' + esc(a.title) + '</h5><p>' + esc(a.body) + '</p></div></div>').join('') : '<p class="hint">اطلاعیه‌ای ثبت نشده است.</p>') + '</section></div>';
+    $('#view').innerHTML = html;
+    $$('#view [data-admin-team]').forEach(btn => btn.addEventListener('click', () => window.Admin.openTeamReport(window.__app, btn.getAttribute('data-admin-team'))));
+  }
 
   function statCard(kind, icon, label, num, foot) {
     return '<div class="stat ' + kind + '"><span class="stat-ic">' + icon + '</span><span class="stat-label">' + esc(label) + '</span><strong class="stat-num">' + num + '</strong><span class="stat-foot">' + esc(foot) + '</span></div>';

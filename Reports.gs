@@ -43,13 +43,27 @@ function completionSnapshot_() {
   const done = {};
   rows_('Progress').forEach(p => {
     const email = String(p.Email).toLowerCase();
-    (done[email] || (done[email] = {}))[String(p.PathItemId)] = true;
+    if (String(p.Status).toLowerCase() === 'completed') (done[email] || (done[email] = {}))[String(p.PathItemId)] = true;
   });
   return (email, teams) => {
     let total = 0, count = 0;
     teams.forEach(t => (items[t] || []).forEach(id => { total++; if ((done[email] || {})[id]) count++; }));
     return {total: total, done: count, percent: total ? Math.round(count * 100 / total) : 0};
   };
+}
+
+// آزمون‌های بدون تیم مشخص فقط وقتی به مسیر فعال متصل‌اند قابل انتساب‌اند.
+function quizTeamMap_() {
+  const map = {}, explicit = {}, pathTeams = {};
+  rows_('Paths').filter(p => truthy_(p.Active)).forEach(p => { pathTeams[String(p.PathId)] = String(p.TeamKey); });
+  rows_('Quizzes').forEach(q => { const key = String(q.TeamKey || ''); if (key) { map[String(q.QuizId)] = [key]; explicit[String(q.QuizId)] = true; } });
+  rows_('PathItems').filter(i => truthy_(i.Active) && i.QuizId && pathTeams[String(i.PathId)]).forEach(i => {
+    const id = String(i.QuizId), team = pathTeams[String(i.PathId)];
+    if (explicit[id]) return;
+    if (!map[id]) map[id] = [];
+    if (map[id].indexOf(team) < 0) map[id].push(team);
+  });
+  return map;
 }
 
 /** گزارش کلی — ادمین: همه تیم‌ها (یا یک تیم)، مدیر تیم: تیم‌های خودش */
@@ -61,14 +75,15 @@ function reportSummary(teamKey) {
   let keys = allowed;
   if (teamKey) { assertTeamAccess_(user, teamKey); keys = [teamKey]; }
 
-  const users = activeUsers_();
+  const users = activeUsers_().filter(u => u.role === 'learner');
+  const quizTeams = quizTeamMap_();
   const attempts = rows_('Attempts').filter(a => String(a.Status) !== 'in_progress');
 
   const teams = keys.map(key => {
     const team = teamConfigByKey_(key);
     const members = users.filter(u => u.teams.indexOf(key) !== -1);
     const memberEmails = members.map(m => m.email);
-    const teamAttempts = attempts.filter(a => memberEmails.indexOf(String(a.Email).toLowerCase()) !== -1);
+    const teamAttempts = attempts.filter(a => memberEmails.indexOf(String(a.Email).toLowerCase()) !== -1 && (quizTeams[String(a.QuizId)] || []).indexOf(key) !== -1);
     const scored = teamAttempts.filter(a => a.Score !== '' && a.Score != null);
     const avgScore = scored.length ? Math.round(scored.reduce((s, a) => s + Number(a.Score || 0), 0) / scored.length) : 0;
     const pendingReview = teamAttempts.filter(a => String(a.Status) === 'pending_review').length;
@@ -86,7 +101,7 @@ function reportSummary(teamKey) {
       avgCompletion: members.length ? Math.round(sumPercent / members.length) : 0,
       completedMembers: completedMembers,
       attempts: teamAttempts.length,
-      avgScore: avgScore,
+      avgScore: avgScore, scoredAttempts: scored.length,
       passedAttempts: teamAttempts.filter(a => truthy_(a.Passed)).length,
       pendingReview: pendingReview
     };
@@ -97,7 +112,7 @@ function reportSummary(teamKey) {
     attempts: teams.reduce((s, t) => s + t.attempts, 0),
     pendingReview: teams.reduce((s, t) => s + t.pendingReview, 0),
     avgScore: teams.length && teams.some(t => t.attempts)
-      ? Math.round(teams.reduce((s, t) => s + t.avgScore * t.attempts, 0) / Math.max(1, teams.reduce((s, t) => s + t.attempts, 0)))
+      ? Math.round(teams.reduce((s, t) => s + t.avgScore * t.scoredAttempts, 0) / Math.max(1, teams.reduce((s, t) => s + t.scoredAttempts, 0)))
       : 0
   };
   return ok_({ teams: teams, totals: totals });
@@ -111,8 +126,9 @@ function reportTeamMembers(teamKey) {
   const menteeMode = user.role === 'mentor';
   if (!menteeMode) requireRole_(user, ['admin', 'team_manager']);
 
-  const users = activeUsers_().filter(u => u.teams.indexOf(teamKey) !== -1);
-  const attempts = rows_('Attempts').filter(a => String(a.Status) !== 'in_progress');
+  const users = activeUsers_().filter(u => u.role === 'learner' && u.teams.indexOf(teamKey) !== -1);
+  const quizTeams = quizTeamMap_();
+  const attempts = rows_('Attempts').filter(a => String(a.Status) !== 'in_progress' && (quizTeams[String(a.QuizId)] || []).indexOf(teamKey) !== -1);
 
   const members = users
     .filter(u => !menteeMode || u.mentorEmail === user.email)
@@ -125,7 +141,7 @@ function reportTeamMembers(teamKey) {
       return {
         email: u.email, name: u.name, role: u.role,
         completion: c.percent, itemsDone: c.done, itemsTotal: c.total,
-        attempts: mine.length,
+        attempts: mine.length, scoredAttempts: scored.length,
         avgScore: scored.length ? Math.round(scored.reduce((s, a) => s + Number(a.Score || 0), 0) / scored.length) : 0,
         passed: mine.filter(a => truthy_(a.Passed)).length,
         pendingReview: mine.filter(a => String(a.Status) === 'pending_review').length,
@@ -149,7 +165,7 @@ function reportMember(email) {
   if (!isSelf) {
     if (user.role === 'admin') { /* ok */ }
     else if (user.role === 'team_manager' && targetUser.teams.some(t => allowedTeams_(user).indexOf(t) !== -1)) { /* ok */ }
-    else if (user.role === 'mentor' && targetUser.mentorEmail === user.email) { /* ok */ }
+    else if (user.role === 'mentor' && targetUser.mentorEmail === user.email && targetUser.teams.some(t => allowedTeams_(user).indexOf(t) !== -1)) { /* ok */ }
     else throw new Error('شما مجوز مشاهده کارنامه این کاربر را ندارید.');
   }
 
@@ -160,10 +176,11 @@ function reportMember(email) {
   const paths = rows_('Paths').filter(p => truthy_(p.Active) && targetUser.teams.indexOf(String(p.TeamKey)) !== -1)
     .map(p => {
       const items = itemsOfPath_(p.PathId);
-      const done = items.filter(i => progressMap['item:' + String(i.ItemId)]).length;
+      const done = items.filter(i => (progressMap['item:' + String(i.ItemId)] || {}).status === 'completed').length;
       return {
         pathId: String(p.PathId), title: String(p.Title), teamKey: String(p.TeamKey),
-        total: items.length, done: done, percent: items.length ? Math.round(done / items.length * 100) : 0
+        total: items.length, done: done, percent: items.length ? Math.round(done / items.length * 100) : 0,
+        items: items.map(i => ({title: String(i.Title || ''), done: (progressMap['item:' + String(i.ItemId)] || {}).status === 'completed', quizId: String(i.QuizId || '')}))
       };
     });
 
@@ -197,7 +214,7 @@ function reportIncomplete(teamKey) {
   let keys = allowed;
   if (teamKey) { assertTeamAccess_(user, teamKey); keys = [teamKey]; }
 
-  const users = activeUsers_();
+  const users = activeUsers_().filter(u => u.role === 'learner');
   const rowsOut = [];
   keys.forEach(key => {
     const members = users.filter(u => u.teams.indexOf(key) !== -1);
@@ -280,7 +297,7 @@ function addMentorNote(menteeEmail, note) {
   const targetUser = activeUsers_().find(u => u.email === target);
   const isAdminOrManager = user.role === 'admin' ||
     (user.role === 'team_manager' && targetUser && targetUser.teams.some(t => allowedTeams_(user).indexOf(t) !== -1));
-  const isMentor = targetUser && targetUser.mentorEmail === user.email;
+  const isMentor = user.role === 'mentor' && targetUser && targetUser.mentorEmail === user.email && targetUser.teams.some(t => allowedTeams_(user).indexOf(t) !== -1);
   if (!isAdminOrManager && !isMentor) throw new Error('شما منتور این کاربر نیستید.');
   sheet_('MentorNotes').appendRow([newId_('NOTE'), nowIso_(), user.email, target, String(note).trim()]);
   logActivity_(user.email, 'mentor_note', target);
