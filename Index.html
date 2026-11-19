@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="سامانه آموزش، آنبوردینگ و ارزیابی یادگیری کارکنان بیمه‌بازار">
+  <title>آکادمی یادگیری | بیمه‌بازار</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <?!= include_('Styles') ?>
+</head>
+<body data-theme="light">
+
+<div class="app" id="appRoot">
+
+  <!-- ══════════ سایدبار ══════════ -->
+  <aside id="sidebar" aria-label="ناوبری اصلی">
+    <div class="brand">
+      <div class="brand-mark" id="brandMark" aria-hidden="true"></div>
+      <div class="brand-text">
+        <strong>آکادمی یادگیری</strong>
+        <small>BimeBazar Learning Academy</small>
+      </div>
+    </div>
+
+    <nav id="sideNav" aria-label="بخش‌ها"></nav>
+
+    <div class="side-bottom">
+      <div class="side-user" id="sideUser" role="button" tabindex="0" title="مشاهده کارنامه من">
+        <div class="avatar" id="sideAvatar">؟</div>
+        <div class="side-user-meta">
+          <strong id="sideName">…</strong>
+          <small id="sideRole">…</small>
+        </div>
+        <span class="side-user-arrow" aria-hidden="true">‹</span>
+      </div>
+      <button class="theme-toggle" id="themeToggle" type="button">
+        <span class="tt-icon" id="themeIcon">☾</span>
+        <span id="themeLabel">تغییر به حالت تاریک</span>
+      </button>
+      <div class="side-foot">BimeBazar Learning Academy<br><span>© ۱۴۰۵ بیمه‌بازار — استفاده داخلی</span></div>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim" aria-hidden="true"></div>
+
+  <!-- ══════════ محتوا ══════════ -->
+  <main id="mainCol">
+    <header class="topbar">
+      <div class="topbar-start">
+        <button class="icon-btn only-mobile" id="menuBtn" aria-label="باز کردن منو">≡</button>
+        <div class="welcome">
+          <h1 id="topTitle">داشبورد</h1>
+          <small id="topSub">سامانه آموزش و آنبوردینگ بیمه‌بازار</small>
+        </div>
+      </div>
+      <div class="topbar-end">
+        <label class="search" id="globalSearchWrap">
+          <span class="search-ic" aria-hidden="true">⌕</span>
+          <input id="globalSearch" type="text" placeholder="جست‌وجو در کتابخانه… (Enter)" autocomplete="off" aria-label="جست‌وجو در کتابخانه">
+          <kbd>/</kbd>
+        </label>
+        <button class="icon-btn bell" id="bellBtn" aria-label="اعلانات">
+          <span aria-hidden="true">🔔</span>
+          <span class="bell-badge" id="bellBadge" hidden>0</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="demo-banner" id="demoBanner" hidden>
+      <strong>حالت پیش‌نمایش فعال است.</strong>
+      داده‌های این نسخه نمونه‌اند و فقط در مرورگر ذخیره می‌شوند؛ به حساب یا داده‌های واقعی سازمان متصل نیستند.
+    </div>
+
+    <div class="demo-banner"><strong>نسخه در حال توسعه:</strong> این سامانه برای بهره‌برداری واقعی و داده حساس تأیید نشده است. جزئیات در docs/status-and-testing.md.</div>
+
+    <div id="view" class="view" aria-live="polite"></div>
+  </main>
+</div>
+
+<!-- ══════════ مودال عمومی ══════════ -->
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="modal" id="modalBox" role="document">
+    <div class="modal-head">
+      <h3 id="modalTitle">—</h3>
+      <button class="icon-btn" id="modalClose" aria-label="بستن">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot" hidden></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<?!= include_('Brand') ?>
+<?!= include_('Demo') ?>
+<?!= include_('AdminQuiz') ?>
+<?!= include_('Admin') ?>
+<?!= include_('App') ?>
+</body>
+</html>

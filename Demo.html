@@ -1,0 +1,668 @@
+<!-- ════════════════════════════════════════════════════════════
+     حالت پیش‌نمایش (Demo Adapter)
+     این فایل فقط وقتی google.script.run وجود ندارد (اجرای محلی/استاتیک)
+     فعال می‌شود و همان اینترفیس سرویس‌دهنده را با داده‌ی نمونه پیاده می‌کند.
+     در Apps Script واقعی، توابع سرور (Code.gs و هم‌‌تیمی‌ها) اجرا می‌شوند.
+     تمام داده‌های این حالت نمونه‌اند و با بنر «حالت پیش‌نمایش» مشخص می‌شوند.
+     ════════════════════════════════════════════════════════════ -->
+<script>
+const DemoAPI = (() => {
+  const DB_KEY = 'bba-demo-db-v3';
+  let db = null;
+
+  /* ───────── داده‌ی نمونه ───────── */
+  function seed() {
+    const folders = {};
+    const addFile = (parent, id, name, mime, size, modified) => {
+      folders[parent].children.push({ id, name, kind: 'file', mimeType: mime, size, modified,
+        url: 'https://drive.google.com/open?id=' + id, previewUrl: 'https://drive.google.com/file/d/' + id + '/preview' });
+    };
+    const addFolder = (parent, id, name, modified) => {
+      folders[id] = { id, name, kind: 'folder', mimeType: 'application/vnd.google-apps.folder', modified: modified || '2026-10-01T08:00:00Z', children: [] };
+      if (parent) folders[parent].children.push(folders[id]);
+      return folders[id];
+    };
+    const T = '2026-11-0';
+    ['account', 'mlm', 'bnpl', 'telesales'].forEach(k => {
+      folders['root-' + k] = { id: 'root-' + k, name: { account: 'Account', mlm: 'MLM', bnpl: 'BNPL', telesales: 'Tele Sales' }[k], kind: 'folder', mimeType: 'application/vnd.google-apps.folder', modified: T + '1T08:00:00Z', children: [] };
+    });
+
+    // Account
+    addFile('root-account', 'acc-1', 'ویدیوی خوش‌آمدگویی مدیرعامل', 'video/mp4', 48234496, T + '2T09:30:00Z');
+    addFile('root-account', 'acc-2', 'آشنایی با محصولات بیمه‌ای بیمه‌بازار', 'application/pdf', 3145728, T + '3T10:00:00Z');
+    addFolder('root-account', 'acc-f1', 'آنبوردینگ ۳۰ روز اول', T + '4T08:00:00Z');
+    addFile('acc-f1', 'acc-3', 'چک‌لیست هفته اول', 'application/pdf', 524288, T + '4T09:00:00Z');
+    addFile('acc-f1', 'acc-4', 'جلسه معارفه تیم و فرآیندها', 'video/mp4', 125829120, T + '5T11:00:00Z');
+    addFile('acc-f1', 'acc-5', 'فرم معرفی و اطلاعات پرسنلی', 'application/vnd.google-apps.document', 0, T + '6T08:30:00Z');
+    addFolder('root-account', 'acc-f2', 'محصولات بیمه‌ای', T + '7T10:00:00Z');
+    addFile('acc-f2', 'acc-6', 'بیمه شخص ثالث — راهنمای فروش', 'application/pdf', 2097152, T + '7T12:00:00Z');
+    addFile('acc-f2', 'acc-7', 'بیمه بدنه — سوالات متداول', 'application/pdf', 1572864, T + '8T09:00:00Z');
+    addFile('acc-f2', 'acc-8', 'جدول مقایسه پوشش‌ها', 'application/vnd.google-apps.spreadsheet', 0, T + '8T14:00:00Z');
+    addFile('acc-f2', 'acc-9', 'بیمه درمان تکمیلی — ارائه به مشتری', 'application/vnd.google-apps.presentation', 0, T + '9T09:00:00Z');
+    addFile('root-account', 'acc-10', 'آیین‌نامه انضباطی و فرهنگ سازمانی', 'application/pdf', 1048576, T + '1T08:00:00Z');
+
+    // MLM
+    addFile('root-mlm', 'mlm-1', 'آیین‌نامه فعالیت MLM', 'application/pdf', 2621440, T + '1T10:00:00Z');
+    addFile('root-mlm', 'mlm-2', 'ساختار پورسانت و پاداش', 'application/vnd.google-apps.spreadsheet', 0, T + '2T10:00:00Z');
+    addFolder('root-mlm', 'mlm-f1', 'آموزش فروش', T + '3T09:00:00Z');
+    addFile('mlm-f1', 'mlm-3', 'تکنیک‌های معرفی محصول', 'video/mp4', 188743680, T + '3T11:00:00Z');
+    addFile('mlm-f1', 'mlm-4', 'مدیریت اعتراض مشتری', 'application/pdf', 1835008, T + '4T10:00:00Z');
+    addFile('mlm-f1', 'mlm-5', 'اسکریپت تماس اول', 'application/vnd.google-apps.document', 0, T + '5T10:00:00Z');
+    addFile('root-mlm', 'mlm-6', 'سیاست‌های بازاریابی و برندینگ', 'application/pdf', 3145728, T + '6T09:00:00Z');
+    addFile('root-mlm', 'mlm-7', 'داشبورد KPI تیم MLM', 'application/vnd.google-apps.spreadsheet', 0, T + '7T09:00:00Z');
+
+    // BNPL
+    addFile('root-bnpl', 'bnpl-1', 'فرآیند خرید اعتباری BNPL — راهنمای کامل', 'application/pdf', 4194304, T + '2T08:00:00Z');
+    addFile('root-bnpl', 'bnpl-2', 'ویدیوی جلسه معرفی BNPL', 'video/mp4', 241172480, T + '2T13:00:00Z');
+    addFile('root-bnpl', 'bnpl-3', 'شرایط و ضوابط خرید اقساطی', 'application/pdf', 1310720, T + '3T08:00:00Z');
+    addFile('root-bnpl', 'bnpl-4', 'سناریوهای ریسک و وصول مطالبات', 'application/vnd.google-apps.document', 0, T + '4T08:00:00Z');
+    addFile('root-bnpl', 'bnpl-5', 'مقایسه BNPL با وام بانکی — یک‌صفحه‌ای', 'application/pdf', 786432, T + '5T08:00:00Z');
+
+    // Tele Sales
+    addFile('root-telesales', 'ts-1', 'اسکریپت تماس فروش تلفنی', 'application/vnd.google-apps.document', 0, T + '1T09:00:00Z');
+    addFile('root-telesales', 'ts-2', 'راهنمای کار با CRM', 'application/pdf', 2359296, T + '2T09:00:00Z');
+    addFolder('root-telesales', 'ts-f1', 'اعتراضات متداول مشتریان', T + '3T09:00:00Z');
+    addFile('ts-f1', 'ts-3', '«الان وقت ندارم» — پاسخ‌ها', 'application/pdf', 917504, T + '3T10:00:00Z');
+    addFile('ts-f1', 'ts-4', '«قیمتش زیاده» — پاسخ‌ها', 'application/pdf', 917504, T + '4T10:00:00Z');
+    addFile('ts-f1', 'ts-5', '«از جای دیگه ارزان‌تره» — پاسخ‌ها', 'application/pdf', 1048576, T + '5T10:00:00Z');
+    addFile('root-telesales', 'ts-6', 'KPIها و هدف‌گذاری ماهانه', 'application/vnd.google-apps.spreadsheet', 0, T + '6T09:00:00Z');
+    addFile('root-telesales', 'ts-7', 'ویدیوی ضبط‌شده تماس موفق', 'video/mp4', 96337920, T + '7T09:00:00Z');
+
+    const quizzes = [
+      { quizId: 'DEMO-QUIZ', refType: 'drive', refId: 'acc-2', title: 'آزمون آشنایی با محصولات بیمه‌ای', description: 'سنجش دانش پایه محصولات بیمه‌ای بیمه‌بازار — برای آیتم «آشنایی با محصولات» در مسیر Account',
+        passScore: 70, timeLimitMin: 10, maxAttempts: 3, shuffleQuestions: true, shuffleOptions: true, showAnswers: 'after_pass', active: true, createdAt: '2026-10-20T08:00:00Z' },
+      { quizId: 'QUIZ-TS-SCRIPT', refType: 'drive', refId: 'ts-1', title: 'آزمون اسکریپت تماس', description: 'تسلط بر اسکریپت استاندارد تماس فروش',
+        passScore: 80, timeLimitMin: 5, maxAttempts: 2, shuffleQuestions: false, shuffleOptions: false, showAnswers: 'always', active: true, createdAt: '2026-10-25T08:00:00Z' }
+    ];
+
+    const questions = [
+      { questionId: 'Q-1', quizId: 'DEMO-QUIZ', order: 1, type: 'mcq', text: 'بیمه شخص ثالث چه چیزی را پوشش می‌دهد؟', options: ['خسارت جانی و مالی واردشده به اشخاص ثالث', 'خسارت خودروی مقصر', 'سرقت خودرو', 'شکست شیشه'], correct: [0], points: 2 },
+      { questionId: 'Q-2', quizId: 'DEMO-QUIZ', order: 2, type: 'multi', text: 'کدام‌یک جزو پوشش‌های اصلی بیمه بدنه است؟', options: ['تصادف', 'آتش‌سوزی', 'سرقت کلی خودرو', 'خسارت فرسودگی و استهلاک'], correct: [0, 1, 2], points: 2 },
+      { questionId: 'Q-3', quizId: 'DEMO-QUIZ', order: 3, type: 'tf', text: 'بیمه درمان تکمیلی فقط هزینه‌های سرپایی را پوشش می‌دهد.', options: ['درست', 'غلط'], correct: [1], points: 1 },
+      { questionId: 'Q-4', quizId: 'DEMO-QUIZ', order: 4, type: 'scenario', text: 'مشتری می‌گوید: «حق بیمه امسالم نسبت به پارسال خیلی بیشتر شده!» بهترین واکنش چیست؟', options: ['عذرخواهی و پایان مکالمه', 'توضیح عوامل مؤثر بر نرخ (سال ساخت، کاربری، خسارت) و پیشنهاد مقایسه پوشش', 'اصرار بی‌قید و شرط بر خرید', 'ارجاع به واحد حقوقی'], correct: [1], points: 2 },
+      { questionId: 'Q-5', quizId: 'DEMO-QUIZ', order: 5, type: 'essay', text: 'به زبان خودتان توضیح دهید «فرانشیز» در بیمه چیست و چه اثری بر حق بیمه دارد؟', options: [], correct: [], points: 3 },
+      { questionId: 'Q-6', quizId: 'QUIZ-TS-SCRIPT', order: 1, type: 'mcq', text: 'در ۳۰ ثانیه اول تماس، مهم‌ترین کار چیست؟', options: ['معرفی کامل شرکت و همه محصولات', 'جلب توجه و معرفی کوتاه خود + دلیل تماس', 'پرسش بودجه مشتری', 'ارسال پیامک قیمت'], correct: [1], points: 1 },
+      { questionId: 'Q-7', quizId: 'QUIZ-TS-SCRIPT', order: 2, type: 'tf', text: 'اگر مشتری گفت «الان وقت ندارم»، باید همان لحظه تماس را خاتمه داد.', options: ['درست', 'غلط'], correct: [1], points: 1 }
+    ];
+
+    const paths = [
+      { pathId: 'PATH-ACC', teamKey: 'account', title: 'آنبوردینگ کارشناسان Account', description: 'مسیر استاندارد ۳۰ روز اول برای کارشناسان تیم اکانت — از معارفه تا استقلال در فروش', order: 1, active: true, createdAt: '2026-10-01T08:00:00Z' },
+      { pathId: 'PATH-MLM', teamKey: 'mlm', title: 'مسیر رشد کارشناس MLM', description: 'از آشنایی با مدل شبکه تا اجرای کمپین‌های بازاریابی', order: 1, active: true, createdAt: '2026-10-02T08:00:00Z' },
+      { pathId: 'PATH-BNPL', teamKey: 'bnpl', title: 'آشنایی با BNPL', description: 'همه‌چیز درباره خرید اعتباری بیمه‌بازار: محصول، ریسک و فرآیند', order: 1, active: true, createdAt: '2026-10-03T08:00:00Z' },
+      { pathId: 'PATH-TS', teamKey: 'telesales', title: 'شروع به کار تله‌سلز', description: 'از اسکریپت تماس تا KPI — آماده‌سازی کامل کارشناسان فروش تلفنی', order: 1, active: true, createdAt: '2026-10-04T08:00:00Z' }
+    ];
+
+    const pathItems = [
+      { itemId: 'PI-ACC-1', pathId: 'PATH-ACC', order: 1, title: 'ویدیوی خوش‌آمدگویی و معارفه', driveItemId: 'acc-1', itemType: 'video', required: true, quizId: '', estimatedMin: 10, active: true },
+      { itemId: 'PI-ACC-2', pathId: 'PATH-ACC', order: 2, title: 'آشنایی با محصولات بیمه‌ای', driveItemId: 'acc-2', itemType: 'drive_file', required: true, quizId: 'DEMO-QUIZ', estimatedMin: 45, active: true },
+      { itemId: 'PI-ACC-3', pathId: 'PATH-ACC', order: 3, title: 'چک‌لیست هفته اول', driveItemId: 'acc-3', itemType: 'drive_file', required: true, quizId: '', estimatedMin: 15, active: true },
+      { itemId: 'PI-ACC-4', pathId: 'PATH-ACC', order: 4, title: 'جلسه معارفه تیم و فرآیندها', driveItemId: 'acc-4', itemType: 'video', required: false, quizId: '', estimatedMin: 30, active: true },
+      { itemId: 'PI-MLM-1', pathId: 'PATH-MLM', order: 1, title: 'آیین‌نامه فعالیت MLM', driveItemId: 'mlm-1', itemType: 'drive_file', required: true, quizId: '', estimatedMin: 25, active: true },
+      { itemId: 'PI-MLM-2', pathId: 'PATH-MLM', order: 2, title: 'ساختار پورسانت و پاداش', driveItemId: 'mlm-2', itemType: 'drive_file', required: true, quizId: '', estimatedMin: 20, active: true },
+      { itemId: 'PI-MLM-3', pathId: 'PATH-MLM', order: 3, title: 'ویدیوی تکنیک‌های معرفی محصول', driveItemId: 'mlm-3', itemType: 'video', required: false, quizId: '', estimatedMin: 40, active: true },
+      { itemId: 'PI-BNPL-1', pathId: 'PATH-BNPL', order: 1, title: 'ویدیوی جلسه معرفی BNPL', driveItemId: 'bnpl-2', itemType: 'video', required: true, quizId: '', estimatedMin: 35, active: true },
+      { itemId: 'PI-BNPL-2', pathId: 'PATH-BNPL', order: 2, title: 'راهنمای کامل فرآیند BNPL', driveItemId: 'bnpl-1', itemType: 'drive_file', required: true, quizId: '', estimatedMin: 30, active: true },
+      { itemId: 'PI-TS-1', pathId: 'PATH-TS', order: 1, title: 'اسکریپت تماس فروش تلفنی', driveItemId: 'ts-1', itemType: 'drive_file', required: true, quizId: 'QUIZ-TS-SCRIPT', estimatedMin: 20, active: true },
+      { itemId: 'PI-TS-2', pathId: 'PATH-TS', order: 2, title: 'راهنمای کار با CRM', driveItemId: 'ts-2', itemType: 'drive_file', required: true, quizId: '', estimatedMin: 25, active: true },
+      { itemId: 'PI-TS-3', pathId: 'PATH-TS', order: 3, title: 'ویدیوی ضبط‌شده تماس موفق', driveItemId: 'ts-7', itemType: 'video', required: false, quizId: '', estimatedMin: 15, active: true }
+    ];
+
+    const users = [
+      { email: 'ali.rezaei@bimebazar.com', name: 'علی رضایی', role: 'learner', teams: 'account', mentorEmail: 'sara.karimi@bimebazar.com', canManage: false, active: true, createdAt: '2026-09-01T08:00:00Z' },
+      { email: 'niloofar.ahmadi@bimebazar.com', name: 'نیلوفر احمدی', role: 'learner', teams: 'account', mentorEmail: 'sara.karimi@bimebazar.com', canManage: false, active: true, createdAt: '2026-09-05T08:00:00Z' },
+      { email: 'sara.karimi@bimebazar.com', name: 'سارا کریمی', role: 'mentor', teams: 'account', mentorEmail: '', canManage: false, active: true, createdAt: '2026-06-15T08:00:00Z' },
+      { email: 'mohammad.salehi@bimebazar.com', name: 'محمد صالحی', role: 'team_manager', teams: 'account', mentorEmail: '', canManage: true, active: true, createdAt: '2026-03-01T08:00:00Z' },
+      { email: 'fateme.nouri@bimebazar.com', name: 'فاطمه نوری', role: 'learner', teams: 'mlm', mentorEmail: 'sara.karimi@bimebazar.com', canManage: false, active: true, createdAt: '2026-09-10T08:00:00Z' },
+      { email: 'hosein.kazemi@bimebazar.com', name: 'حسین کاظمی', role: 'learner', teams: 'bnpl', mentorEmail: '', canManage: false, active: true, createdAt: '2026-09-12T08:00:00Z' },
+      { email: 'reza.mohammadi@bimebazar.com', name: 'رضا محمدی', role: 'team_manager', teams: 'mlm,bnpl', mentorEmail: '', canManage: true, active: true, createdAt: '2026-02-20T08:00:00Z' },
+      { email: 'maryam.javadi@bimebazar.com', name: 'مریم جوادی', role: 'learner', teams: 'telesales', mentorEmail: '', canManage: false, active: false, createdAt: '2026-08-01T08:00:00Z' }
+    ];
+
+    const db = {
+      v: 2,
+      folders: folders, users, paths, pathItems,
+      progress: [
+        { email: 'demo-viewer@demo.local', pathItemId: 'item:PI-ACC-1', status: 'completed', completedAt: '2026-11-10T09:00:00Z', score: 100 },
+        { email: 'demo-viewer@demo.local', pathItemId: 'drive:acc-1', status: 'completed', completedAt: '2026-11-10T09:00:00Z', score: 100 },
+        { email: 'ali.rezaei@bimebazar.com', pathItemId: 'item:PI-ACC-1', status: 'completed', completedAt: '2026-11-12T10:00:00Z', score: 100 },
+        { email: 'ali.rezaei@bimebazar.com', pathItemId: 'item:PI-ACC-2', status: 'completed', completedAt: '2026-11-14T10:00:00Z', score: 90 },
+        { email: 'niloofar.ahmadi@bimebazar.com', pathItemId: 'item:PI-ACC-1', status: 'completed', completedAt: '2026-11-13T10:00:00Z', score: 100 },
+        { email: 'fateme.nouri@bimebazar.com', pathItemId: 'item:PI-MLM-1', status: 'completed', completedAt: '2026-11-15T10:00:00Z', score: 100 },
+        { email: 'hosein.kazemi@bimebazar.com', pathItemId: 'item:PI-BNPL-1', status: 'completed', completedAt: '2026-11-16T10:00:00Z', score: 100 }
+      ],
+      quizzes, questions,
+      attempts: [
+        { attemptId: 'ATT-DEMO-1', timestamp: '2026-11-16T11:30:00Z', email: 'demo-viewer@demo.local', quizId: 'DEMO-QUIZ', score: 60, passed: false, status: 'auto', answers: [{questionId:'Q-1',value:0},{questionId:'Q-2',value:[0]},{questionId:'Q-3',value:1},{questionId:'Q-4',value:0},{questionId:'Q-5',value:'فرانشیز یعنی بخشی از خسارت که بر عهده بیمه‌گذار است.'}], feedback: '', timeSpentSec: 240 },
+        { attemptId: 'ATT-ALI-1', timestamp: '2026-11-14T10:00:00Z', email: 'ali.rezaei@bimebazar.com', quizId: 'DEMO-QUIZ', score: 90, passed: true, status: 'reviewed', answers: [], feedback: 'عملکرد عالی — پاسخ تشریحی هم کامل بود.', timeSpentSec: 300 }
+      ],
+      announcements: [
+        { id: 'ANN-1', title: 'مسیر جدید BNPL منتشر شد', body: 'مسیر «آشنایی با BNPL» برای همه کارشناسان Account و Tele Sales فعال شد. تکمیل آن تا پایان آذر الزامی است.', audience: 'all', active: true, createdAt: '2026-11-15T08:00:00Z' },
+        { id: 'ANN-2', title: 'تمدید مهلت آزمون محصولات بیمه‌ای', body: 'مهلت شرکت در آزمون DEMO-QUIZ تا ۳۰ آذر تمدید شد.', audience: 'team:account', active: true, createdAt: '2026-11-10T08:00:00Z' }
+      ],
+      activity: [
+        { id: 'ACT-1', timestamp: '2026-11-16T11:30:00Z', email: 'demo-viewer@demo.local', action: 'quiz_submit', detail: 'آزمون آشنایی با محصولات بیمه‌ای — ۶۰٪' },
+        { id: 'ACT-2', timestamp: '2026-11-10T09:00:00Z', email: 'demo-viewer@demo.local', action: 'path_item_complete', detail: 'ویدیوی خوش‌آمدگویی و معارفه' }
+      ],
+      mentorNotes: [
+        { id: 'NOTE-1', timestamp: '2026-11-14T10:30:00Z', mentorEmail: 'sara.karimi@bimebazar.com', menteeEmail: 'ali.rezaei@bimebazar.com', note: 'علی در بخش محصولات بیمه‌ای بسیار قوی است؛ برای مذاکره با مشتریان سازمانی آماده می‌شود.' }
+      ]
+    };
+    return db;
+  }
+
+  function load() {
+    if (db) return db;
+    try { const raw = localStorage.getItem(DB_KEY); db = raw ? JSON.parse(raw) : seed(); }
+    catch (e) { db = seed(); }
+    if (!db || db.v !== 2) db = seed();
+    return db;
+  }
+  function save() { try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch (e) {} }
+  function reset() { localStorage.removeItem(DB_KEY); db = null; }
+
+  const DEMO_USER = { email: 'demo-viewer@demo.local', name: 'کاربر نمایشی', role: 'admin', roleLabel: 'مدیر سامانه (نمایشی)', teams: ['account', 'mlm', 'bnpl', 'telesales'], canManage: true, mentorEmail: '', demo: true };
+  const nowIso = () => new Date().toISOString();
+  const uid = p => p + '-' + Math.random().toString(36).slice(2, 9);
+  const truthy = v => v === true || ['true', 'yes', '1'].includes(String(v).toLowerCase());
+  const splitCsv = v => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const myEmail = () => DEMO_USER.email;
+  const shuffle = arr => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const attemptsOf = email => load().attempts.filter(a => String(a.email).toLowerCase() === String(email).toLowerCase() && a.status !== 'in_progress');
+  const passedQuizSet = email => { const s = {}; attemptsOf(email).forEach(a => { if (truthy(a.passed)) s[a.quizId] = true; }); return s; };
+  const progressMapOf = email => { const m = {}; load().progress.forEach(p => { if (String(p.email).toLowerCase() === String(email).toLowerCase()) m[p.pathItemId] = p; }); return m; };
+  const pathItemsOf = pathId => load().pathItems.filter(i => i.pathId === pathId && truthy(i.active)).sort((a, b) => a.order - b.order);
+  const quizById = qid => load().quizzes.find(q => q.quizId === qid) || null;
+  const questionsOf = qid => load().questions.filter(q => q.quizId === qid).sort((a, b) => a.order - b.order);
+  const logActivity = (email, action, detail) => { load().activity.push({ id: uid('ACT'), timestamp: nowIso(), email, action, detail: detail || '' }); };
+  const teamOfPath = pathId => (load().paths.find(p => p.pathId === pathId) || {}).teamKey;
+
+  function markProgress(email, itemKey, score) {
+    const d = load();
+    const ex = d.progress.find(p => String(p.email).toLowerCase() === String(email).toLowerCase() && p.pathItemId === itemKey);
+    if (ex) { ex.status = 'completed'; ex.completedAt = nowIso(); ex.score = score || 100; }
+    else d.progress.push({ email, pathItemId: itemKey, status: 'completed', completedAt: nowIso(), score: score || 100 });
+  }
+
+  function findNode(id, parent) {
+    const d = load();
+    if (!id) return null;
+    if (d.folders[id]) return d.folders[id];
+    for (const key of Object.keys(d.folders)) {
+      const f = d.folders[key];
+      const hit = (f.children || []).find(c => c.id === id);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function fileSizeLabel(n) {
+    n = Number(n) || 0; if (!n) return '';
+    if (n >= 1073741824) return (n / 1073741824).toFixed(1) + ' GB';
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+    return Math.max(1, Math.round(n / 1024)) + ' KB';
+  }
+  function iconOf(mime) {
+    mime = String(mime || '');
+    if (mime.includes('folder')) return 'FOLDER';
+    if (mime === 'application/pdf') return 'PDF';
+    if (mime.startsWith('video/')) return 'VIDEO';
+    if (mime.startsWith('image/')) return 'IMAGE';
+    if (mime.includes('spreadsheet') || mime.includes('excel')) return 'SHEET';
+    if (mime.includes('document') || mime.includes('word')) return 'DOC';
+    if (mime.includes('presentation') || mime.includes('slides')) return 'SLIDES';
+    return 'FILE';
+  }
+  function withStatus(item, email) {
+    const pm = progressMapOf(email);
+    const qm = {}; load().quizzes.forEach(q => { if (q.refType === 'drive') qm[q.refId] = q.quizId; });
+    return Object.assign(item, {
+      icon: iconOf(item.mimeType),
+      size: item.kind === 'folder' ? '' : fileSizeLabel(item.size),
+      quiz: qm[item.id] ? { available: true, quizId: qm[item.id] } : { available: false },
+      status: pm['drive:' + item.id] ? 'completed' : 'not_started'
+    });
+  }
+
+  function teamRoot(teamKey) {
+    const name = { account: 'Account', mlm: 'MLM', bnpl: 'BNPL', telesales: 'Tele Sales' }[teamKey];
+    return { id: 'root-' + teamKey, key: teamKey, name, color: { account: 'blue', mlm: 'orange', bnpl: 'green', telesales: 'purple' }[teamKey], icon: { account: '◈', mlm: '◇', bnpl: '▣', telesales: '◉' }[teamKey], mimeType: 'application/vnd.google-apps.folder' };
+  }
+  const pageOf = (list, pageToken, pageSize) => {
+    const start = pageToken ? parseInt(pageToken, 10) || 0 : 0;
+    const size = pageSize || 12;
+    const slice = list.slice(start, start + size);
+    return { items: slice, nextPageToken: (start + size < list.length) ? String(start + size) : '', hasMore: (start + size) < list.length };
+  };
+
+  /* ───────── API ───────── */
+  const handlers = {
+    getBootstrap() {
+      const d = load();
+      const teams = ['account', 'mlm', 'bnpl', 'telesales'].map(teamRoot);
+      const myPaths = handlers.listMyPaths('').paths;
+      const pm = progressMapOf(myEmail());
+      const quizPass = passedQuizSet(myEmail());
+      let pending = 0;
+      myPaths.forEach(p => pathItemsOf(p.pathId).forEach(i => { if (i.quizId && !quizPass[i.quizId] && !pm['item:' + i.itemId]) pending++; }));
+      const totals = myPaths.reduce((a, p) => ({ total: a.total + p.total, done: a.done + p.done }), { total: 0, done: 0 });
+      return {
+        ok: true,
+        user: clone(DEMO_USER),
+        drive: { rootName: 'فولدر اصلی آموزشی (نمونه)', error: '' },
+        teams,
+        stats: { teams: teams.length, paths: myPaths.length, totalItems: totals.total, completedItems: totals.done, completionPercent: totals.total ? Math.round(totals.done / totals.total * 100) : 0, pendingQuizzes: pending, totalAttempts: attemptsOf(myEmail()).length },
+        activePaths: myPaths.filter(p => p.percent < 100).slice(0, 4),
+        allPaths: myPaths,
+        recommended: myPaths.filter(p => p.done === 0 && p.total > 0).slice(0, 3),
+        recentActivity: d.activity.filter(a => a.email.toLowerCase() === myEmail()).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 6).map(a => ({ action: a.action, detail: a.detail, timestamp: a.timestamp })),
+        announcements: handlers.listAnnouncements().announcements,
+        pageSize: 12,
+        roleLabels: { admin: 'مدیر سامانه', team_manager: 'مدیر تیم', mentor: 'منتور', learner: 'کارشناس' }
+      };
+    },
+
+    listMyPaths(teamKey) {
+      const d = load();
+      const pm = progressMapOf(myEmail());
+      const keys = teamKey ? [teamKey] : ['account', 'mlm', 'bnpl', 'telesales'];
+      const paths = d.paths.filter(p => truthy(p.active) && keys.includes(p.teamKey)).sort((a, b) => a.order - b.order).map(p => {
+        const items = pathItemsOf(p.pathId);
+        const done = items.filter(i => pm['item:' + i.itemId]).length;
+        const team = teamRoot(p.teamKey);
+        return { pathId: p.pathId, teamKey: p.teamKey, teamName: team.name, teamColor: team.color, teamIcon: team.icon, title: p.title, description: p.description, order: p.order, total: items.length, done, percent: items.length ? Math.round(done / items.length * 100) : 0 };
+      });
+      return { ok: true, paths };
+    },
+
+    getPath(pathId) {
+      const d = load();
+      const p = d.paths.find(x => x.pathId === pathId);
+      if (!p) throw new Error('مسیر یادگیری پیدا نشد.');
+      const pm = progressMapOf(myEmail());
+      const team = teamRoot(p.teamKey);
+      const quizPass = passedQuizSet(myEmail());
+      let blocked = false;
+      const items = pathItemsOf(pathId).map(item => {
+        const done = !!pm['item:' + item.itemId];
+        let status;
+        if (done) status = 'completed';
+        else if (blocked) status = 'locked';
+        else if (item.quizId && !quizPass[item.quizId]) status = 'quiz_pending';
+        else status = 'available';
+        if (truthy(item.required) && !done) blocked = true;
+        const q = item.quizId ? quizById(item.quizId) : null;
+        return { itemId: item.itemId, order: item.order, title: item.title, driveItemId: item.driveItemId, itemType: item.itemType, required: truthy(item.required), quizId: item.quizId || '', quiz: q ? { available: true, quizId: q.quizId, title: q.title, passScore: q.passScore, questionCount: questionsOf(q.quizId).length, timeLimitMin: q.timeLimitMin, maxAttempts: q.maxAttempts } : null, estimatedMin: item.estimatedMin, status, completedAt: pm['item:' + item.itemId] ? pm['item:' + item.itemId].completedAt : '' };
+      });
+      const done = items.filter(i => i.status === 'completed').length;
+      return { ok: true, path: { pathId: p.pathId, teamKey: p.teamKey, teamName: team.name, title: p.title, description: p.description, order: p.order, total: items.length, done, percent: items.length ? Math.round(done / items.length * 100) : 0 }, items };
+    },
+
+    markItemComplete(pathItemId) {
+      const d = load();
+      const item = d.pathItems.find(i => i.itemId === pathItemId);
+      if (!item) throw new Error('آیتم مسیر پیدا نشد.');
+      if (item.quizId && !passedQuizSet(myEmail())[item.quizId]) throw new Error('برای تکمیل این مرحله ابتدا باید در آزمون متصل قبول شوید.');
+      markProgress(myEmail(), 'item:' + item.itemId, 100);
+      logActivity(myEmail(), 'path_item_complete', item.title);
+      save();
+      return { ok: true };
+    },
+
+    getLibraryPage(folderId, pageToken, searchText, typeFilter, teamKey) {
+      const d = load();
+      let targetId, targetName, children;
+      if (!folderId) {
+        const root = d.folders['root-' + teamKey];
+        if (!root) throw new Error('تیم پیدا نشد.');
+        targetId = root.id; targetName = root.name; children = root.children.slice();
+      } else if (d.folders[folderId]) {
+        targetId = folderId; targetName = d.folders[folderId].name; children = d.folders[folderId].children.slice();
+      } else {
+        throw new Error('این آیتم پوشه نیست یا دسترسی به آن مجاز نیست.');
+      }
+      if (searchText) children = children.filter(c => c.name.toLowerCase().includes(String(searchText).toLowerCase()));
+      if (typeFilter === 'folder') children = children.filter(c => c.kind === 'folder');
+      if (typeFilter === 'file') children = children.filter(c => c.kind !== 'folder');
+      const foldersFirst = (a, b) => (a.kind === 'folder' ? 0 : 1) - (b.kind === 'folder' ? 0 : 1) || a.name.localeCompare(b.name, 'fa');
+      children.sort(foldersFirst);
+      const page = pageOf(children, pageToken, 12);
+      return { ok: true, items: page.items.map(i => withStatus(clone(i), myEmail())), nextPageToken: page.nextPageToken, hasMore: page.hasMore, pageSize: 12, folderId: targetId, folderName: targetName, teamId: 'root-' + teamKey };
+    },
+
+    getItemDetail(teamKey, itemId) {
+      const node = findNode(itemId);
+      if (!node) throw new Error('آیتم پیدا نشد.');
+      return { ok: true, item: withStatus(clone(node), myEmail()), quiz: (quizById((load().quizzes.find(q => q.refId === itemId) || {}).quizId || '') ? { available: true } : { available: false }) };
+    },
+
+    markDriveItemComplete(teamKey, itemId) {
+      markProgress(myEmail(), 'drive:' + itemId, 100);
+      logActivity(myEmail(), 'item_complete', itemId);
+      save();
+      return { ok: true };
+    },
+
+    getQuizForAttempt(quizId) {
+      const d = load();
+      const q = quizById(quizId);
+      if (!q || !truthy(q.active)) throw new Error('این آزمون فعال نیست یا پیدا نشد.');
+      const used = attemptsOf(myEmail()).filter(a => a.quizId === quizId).length;
+      if (q.maxAttempts > 0 && used >= q.maxAttempts) throw new Error('تعداد تلاش‌های مجاز شما برای این آزمون به پایان رسیده است.');
+      let questions = questionsOf(quizId).map(x => ({ questionId: x.questionId, order: x.order, type: x.type, text: x.text, options: x.options.slice(), points: x.points }));
+      if (truthy(q.shuffleQuestions)) questions = shuffle(questions);
+      const shuffleOptions = truthy(q.shuffleOptions);
+      const tagged = questions.map(question => {
+        if (!shuffleOptions || !question.options || question.options.length < 2) return question;
+        const t = question.options.map((text, index) => ({ index, text }));
+        return Object.assign({}, question, { options: shuffle(t) });
+      });
+      return { ok: true, quiz: { quizId: q.quizId, title: q.title, description: q.description, passScore: q.passScore, timeLimitMin: q.timeLimitMin || 0, maxAttempts: q.maxAttempts || 0, attemptsUsed: used, totalPoints: questions.reduce((s, x) => s + x.points, 0), shuffleOptions }, questions: tagged, attemptToken: q.timeLimitMin ? uid('tok') : '' };
+    },
+
+    submitQuiz(quizId, answers, timeSpentSec, attemptToken) {
+      const d = load();
+      const q = quizById(quizId);
+      if (!q || !truthy(q.active)) throw new Error('این آزمون فعال نیست یا پیدا نشد.');
+      const used = attemptsOf(myEmail()).filter(a => a.quizId === quizId).length;
+      if (q.maxAttempts > 0 && used >= q.maxAttempts) throw new Error('تعداد تلاش‌های مجاز شما برای این آزمون به پایان رسیده است.');
+      const questions = questionsOf(quizId);
+      const totalPoints = questions.reduce((s, x) => s + x.points, 0);
+      const hasEssay = questions.some(x => x.type === 'essay');
+      const ansMap = {}; (answers || []).forEach(a => { if (a && a.questionId) ansMap[a.questionId] = a.value; });
+      let earned = 0;
+      const review = questions.map(question => {
+        const given = ansMap[question.questionId];
+        let isCorrect = null, awarded = 0;
+        if (question.type === 'essay') { isCorrect = null; }
+        else if (question.type === 'multi') { const g = (Array.isArray(given) ? given.map(Number).sort() : []); const c = question.correct.map(Number).sort(); isCorrect = g.length === c.length && g.every((v, i) => v === c[i]); }
+        else { const g = (given === undefined || given === null) ? -1 : Number(given); isCorrect = g === Number(question.correct[0]); }
+        if (isCorrect === true) { earned += question.points; awarded = question.points; }
+        return { questionId: question.questionId, type: question.type, given: given === undefined ? null : given, correct: question.correct, isCorrect, awarded, points: question.points };
+      });
+      const score = totalPoints ? Math.round(earned / totalPoints * 100) : 0;
+      const status = hasEssay ? 'pending_review' : 'auto';
+      const passed = !hasEssay && score >= q.passScore;
+      d.attempts.push({ attemptId: uid('ATT'), timestamp: nowIso(), email: myEmail(), quizId, score, passed, status, answers: answers || [], feedback: '', timeSpentSec: Number(timeSpentSec) || 0 });
+      if (!hasEssay && passed) d.pathItems.filter(i => i.quizId === quizId).forEach(i => markProgress(myEmail(), 'item:' + i.itemId, score));
+      logActivity(myEmail(), 'quiz_submit', q.title + ' — ' + score + '٪');
+      save();
+      const reveal = q.showAnswers === 'always' || (q.showAnswers === 'after_pass' && passed);
+      return { ok: true, score, passed, status, correctCount: review.filter(r => r.isCorrect === true).length, wrongCount: review.filter(r => r.isCorrect === false).length, pendingCount: review.filter(r => r.isCorrect === null).length, totalQuestions: questions.length, passScore: q.passScore, attemptsUsed: used + 1, maxAttempts: q.maxAttempts || 0, review: reveal ? review.map(r => ({ questionId: r.questionId, given: r.given, correct: r.correct, isCorrect: r.isCorrect, awarded: r.awarded, points: r.points })) : null };
+    },
+
+    getMyTranscript() {
+      const d = load();
+      const qmap = {}; d.quizzes.forEach(q => qmap[q.quizId] = q);
+      const mine = attemptsOf(myEmail()).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map(a => ({ attemptId: a.attemptId, quizId: a.quizId, quizTitle: (qmap[a.quizId] || {}).title || 'آزمون حذف‌شده', score: a.score, passed: truthy(a.passed), status: a.status, timestamp: a.timestamp, timeSpentSec: a.timeSpentSec || 0, feedback: a.feedback || '' }));
+      const best = {}; mine.forEach(a => { if (!best[a.quizId] || a.score > best[a.quizId].score) best[a.quizId] = a; });
+      const summary = { totalAttempts: mine.length, passedQuizzes: Object.keys(best).filter(k => best[k].passed).length, uniqueQuizzes: Object.keys(best).length, avgScore: mine.length ? Math.round(mine.reduce((s, a) => s + a.score, 0) / mine.length) : 0 };
+      return { ok: true, attempts: mine, summary };
+    },
+
+    listAnnouncements() {
+      const d = load();
+      return { ok: true, announcements: d.announcements.filter(a => truthy(a.active)).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)) };
+    },
+
+    /* ─── ادمین: کاربران ─── */
+    adminListUsers() { const d = load(); return { ok: true, users: clone(d.users), teams: ['account', 'mlm', 'bnpl', 'telesales'].map(k => ({ key: k, name: teamRoot(k).name })) }; },
+    adminUpsertUser(payload) {
+      const d = load();
+      if (!payload || !payload.email) throw new Error('ایمیل کاربر الزامی است.');
+      const email = String(payload.email).toLowerCase().trim();
+      const teams = (payload.teams || []).filter(k => ['account', 'mlm', 'bnpl', 'telesales'].includes(k));
+      const role = payload.role || 'learner';
+      if (role !== 'admin' && !teams.length) throw new Error('حداقل یک تیم برای کاربر انتخاب کنید.');
+      const ex = d.users.find(u => u.email.toLowerCase() === email);
+      if (ex) Object.assign(ex, { name: payload.name || '', role, teams: teams.join(','), mentorEmail: (payload.mentorEmail || '').toLowerCase().trim(), canManage: !!payload.canManage, active: payload.active === undefined ? ex.active : payload.active !== false });
+      else d.users.push({ email, name: payload.name || '', role, teams: teams.join(','), mentorEmail: (payload.mentorEmail || '').toLowerCase().trim(), canManage: !!payload.canManage, active: true, createdAt: nowIso() });
+      logActivity(myEmail(), ex ? 'user_update' : 'user_create', email); save();
+      return { ok: true, saved: email };
+    },
+    adminSetUserActive(email, active) { const d = load(); const u = d.users.find(u => u.email.toLowerCase() === String(email).toLowerCase()); if (!u) throw new Error('کاربر پیدا نشد.'); u.active = !!active; logActivity(myEmail(), active ? 'user_activate' : 'user_deactivate', email); save(); return { ok: true }; },
+    adminTeamsStatus() { return { ok: true, rootName: 'فولدر اصلی آموزشی (نمونه)', error: '', teams: ['account', 'mlm', 'bnpl', 'telesales'].map(k => ({ key: k, name: teamRoot(k).name, found: true, folderId: 'root-' + k })) }; },
+
+    /* ─── ادمین: محتوا ─── */
+    adminListPaths(teamKey) {
+      const d = load();
+      const keys = teamKey ? [teamKey] : ['account', 'mlm', 'bnpl', 'telesales'];
+      const paths = d.paths.filter(p => keys.includes(p.teamKey)).sort((a, b) => a.teamKey.localeCompare(b.teamKey) || a.order - b.order).map(p => ({ pathId: p.pathId, teamKey: p.teamKey, title: p.title, description: p.description, order: p.order, active: truthy(p.active), itemCount: d.pathItems.filter(i => i.pathId === p.pathId && truthy(i.active)).length }));
+      return { ok: true, paths, teams: keys.map(k => ({ key: k, name: teamRoot(k).name })), quizzes: d.quizzes.filter(q => truthy(q.active)).map(q => ({ quizId: q.quizId, title: q.title })) };
+    },
+    adminSavePath(payload) {
+      const d = load();
+      if (!payload.title || !String(payload.title).trim()) throw new Error('عنوان مسیر الزامی است.');
+      if (payload.pathId) { const p = d.paths.find(x => x.pathId === payload.pathId); if (!p) throw new Error('مسیر پیدا نشد.'); Object.assign(p, { title: String(payload.title).trim(), description: payload.description || '', order: Number(payload.order) || 0, active: payload.active !== false }); save(); return { ok: true, pathId: p.pathId }; }
+      const pathId = uid('PATH');
+      d.paths.push({ pathId, teamKey: payload.teamKey, title: String(payload.title).trim(), description: payload.description || '', order: Number(payload.order) || 0, active: true, createdAt: nowIso() });
+      logActivity(myEmail(), 'path_create', payload.title); save();
+      return { ok: true, pathId, created: true };
+    },
+    adminDeletePath(pathId) { const d = load(); const p = d.paths.find(x => x.pathId === pathId); if (!p) throw new Error('مسیر پیدا نشد.'); p.active = false; save(); return { ok: true }; },
+    adminPathItems(pathId) { const d = load(); const p = d.paths.find(x => x.pathId === pathId); if (!p) throw new Error('مسیر پیدا نشد.'); return { ok: true, items: clone(d.pathItems.filter(i => i.pathId === pathId).sort((a, b) => a.order - b.order)), path: { pathId: p.pathId, title: p.title, teamKey: p.teamKey } }; },
+    adminSavePathItem(payload) {
+      const d = load();
+      if (!payload.pathId) throw new Error('مسیر مشخص نیست.');
+      if (!payload.title || !String(payload.title).trim()) throw new Error('عنوان آیتم الزامی است.');
+      const driveItemId = payload.driveItemId || '';
+      const row = { pathId: payload.pathId, order: Number(payload.order) || 0, title: String(payload.title).trim(), driveItemId, itemType: payload.itemType || (driveItemId ? 'drive_file' : 'link'), required: payload.required !== false, quizId: payload.quizId || '', estimatedMin: Number(payload.estimatedMin) || 0, active: payload.active !== false };
+      if (payload.itemId) { const ex = d.pathItems.find(i => i.itemId === payload.itemId); if (!ex) throw new Error('آیتم پیدا نشد.'); Object.assign(ex, row); save(); return { ok: true, itemId: ex.itemId }; }
+      row.itemId = uid('PI');
+      d.pathItems.push(row); logActivity(myEmail(), 'path_item_create', row.title); save();
+      return { ok: true, itemId: row.itemId, created: true };
+    },
+    adminDeletePathItem(itemId) { const d = load(); const ex = d.pathItems.find(i => i.itemId === itemId); if (!ex) throw new Error('آیتم پیدا نشد.'); ex.active = false; save(); return { ok: true }; },
+    adminDriveMeta(input) {
+      const d = load();
+      const s = String(input || '').trim();
+      const m = s.match(/\/d\/([a-zA-Z0-9_-]{3,})/) || s.match(/[?&]id=([a-zA-Z0-9_-]{3,})/);
+      const id = m ? m[1] : s;
+      const node = findNode(id);
+      if (node) return { ok: true, id: node.id, name: node.name, mimeType: node.mimeType || 'application/octet-stream', size: node.size ? fileSizeLabel(node.size) : '', modified: node.modified || '', url: node.url || '', icon: iconOf(node.mimeType) };
+      return { ok: true, id, name: 'فایل «' + id + '» (نمونه)', mimeType: 'application/pdf', size: '', modified: '', url: '', icon: 'PDF' };
+    },
+
+    /* ─── ادمین: آزمون‌ها ─── */
+    adminListQuizzes() {
+      const d = load();
+      const counts = {}; d.questions.forEach(q => counts[q.quizId] = (counts[q.quizId] || 0) + 1);
+      return { ok: true, quizzes: clone(d.quizzes).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(q => Object.assign(q, { questionCount: counts[q.quizId] || 0 })) };
+    },
+    adminGetQuiz(quizId) { const d = load(); const q = quizById(quizId); if (!q) throw new Error('آزمون پیدا نشد.'); return { ok: true, quiz: clone(q), questions: clone(questionsOf(quizId)) }; },
+    adminSaveQuiz(payload) {
+      const d = load();
+      if (!payload.title || !String(payload.title).trim()) throw new Error('عنوان آزمون الزامی است.');
+      const row = { refType: payload.refType || 'standalone', refId: payload.refId || '', title: String(payload.title).trim(), description: payload.description || '', passScore: Number(payload.passScore) || 70, timeLimitMin: Number(payload.timeLimitMin) || 0, maxAttempts: Number(payload.maxAttempts) || 0, shuffleQuestions: !!payload.shuffleQuestions, shuffleOptions: !!payload.shuffleOptions, showAnswers: payload.showAnswers || 'after_pass', active: payload.active !== false };
+      if (payload.quizId) { const ex = quizById(payload.quizId); if (!ex) throw new Error('آزمون پیدا نشد.'); Object.assign(ex, row); save(); return { ok: true, quizId: ex.quizId }; }
+      row.quizId = uid('QUIZ'); row.createdAt = nowIso();
+      d.quizzes.push(row); logActivity(myEmail(), 'quiz_create', row.title); save();
+      return { ok: true, quizId: row.quizId, created: true };
+    },
+    adminDeleteQuiz(quizId) { const d = load(); const q = quizById(quizId); if (!q) throw new Error('آزمون پیدا نشد.'); q.active = false; save(); return { ok: true }; },
+    adminSaveQuestion(payload) {
+      const d = load();
+      const q = quizById(payload.quizId); if (!q) throw new Error('آزمون پیدا نشد.');
+      const type = payload.type || 'mcq';
+      const text = String(payload.text || '').trim(); if (!text) throw new Error('متن سؤال الزامی است.');
+      const options = (payload.options || []).map(o => String(o)).filter(o => o.trim() !== '');
+      let correct = payload.correct;
+      if (type === 'tf') { correct = [Number(Array.isArray(correct) ? correct[0] : correct) === 1 ? 1 : 0]; }
+      else if (type === 'essay') correct = [];
+      else if (type === 'multi') { correct = (Array.isArray(correct) ? correct : [correct]).map(Number).filter(n => !isNaN(n) && n >= 0 && n < options.length); if (!correct.length) throw new Error('حداقل یک پاسخ صحیح انتخاب کنید.'); }
+      else { const idx = Number(Array.isArray(correct) ? correct[0] : correct); if (isNaN(idx) || idx < 0 || idx >= options.length) throw new Error('پاسخ صحیح را انتخاب کنید.'); correct = [idx]; }
+      const finalOptions = type === 'tf' ? ['درست', 'غلط'] : options;
+      const row = { quizId: payload.quizId, order: Number(payload.order) || questionsOf(payload.quizId).length + 1, type, text, options: finalOptions, correct, points: Math.max(0, Number(payload.points) || 1) };
+      if (payload.questionId) { const ex = d.questions.find(x => x.questionId === payload.questionId); if (!ex) throw new Error('سؤال پیدا نشد.'); Object.assign(ex, row); save(); return { ok: true, questionId: ex.questionId }; }
+      row.questionId = uid('Q'); d.questions.push(row); save();
+      return { ok: true, questionId: row.questionId, created: true };
+    },
+    adminDeleteQuestion(questionId) { const d = load(); const i = d.questions.findIndex(x => x.questionId === questionId); if (i === -1) throw new Error('سؤال پیدا نشد.'); d.questions.splice(i, 1); save(); return { ok: true }; },
+
+    /* ─── ادمین: بازبینی ─── */
+    adminListAttempts(filter) {
+      const d = load(); filter = filter || {};
+      const qmap = {}; d.quizzes.forEach(q => qmap[q.quizId] = q);
+      const umap = {}; d.users.forEach(u => umap[u.email.toLowerCase()] = u.name);
+      const status = filter.status || 'pending_review';
+      const rows = d.attempts.filter(a => a.status !== 'in_progress')
+        .filter(a => !status || a.status === status)
+        .filter(a => !filter.quizId || a.quizId === filter.quizId)
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 200)
+        .map(a => ({ attemptId: a.attemptId, timestamp: a.timestamp, email: a.email, userName: umap[String(a.email).toLowerCase()] || a.email, quizId: a.quizId, quizTitle: (qmap[a.quizId] || {}).title || 'آزمون حذف‌شده', score: a.score, passed: truthy(a.passed), status: a.status, feedback: a.feedback || '' }));
+      return { ok: true, attempts: rows };
+    },
+    adminGetAttemptDetail(attemptId) {
+      const d = load(); const a = d.attempts.find(x => x.attemptId === attemptId); if (!a) throw new Error('تلاش پیدا نشد.');
+      return { ok: true, attempt: clone(a), questions: clone(questionsOf(a.quizId)) };
+    },
+    adminReviewAttempt(attemptId, essayMarks, feedback) {
+      const d = load(); const a = d.attempts.find(x => x.attemptId === attemptId); if (!a) throw new Error('تلاش پیدا نشد.');
+      const questions = questionsOf(a.quizId);
+      const totalPoints = questions.reduce((s, x) => s + x.points, 0);
+      const ansMap = {}; (a.answers || []).forEach(x => { if (x && x.questionId) ansMap[x.questionId] = x.value; });
+      let earned = 0;
+      questions.forEach(question => {
+        if (question.type === 'essay') { const m = Number(essayMarks ? essayMarks[question.questionId] : 0); earned += Math.max(0, Math.min(question.points, isNaN(m) ? 0 : m)); }
+        else if (question.type === 'multi') { const g = Array.isArray(ansMap[question.questionId]) ? ansMap[question.questionId].map(Number).sort() : []; const c = question.correct.map(Number).sort(); if (g.length === c.length && g.every((v, i) => v === c[i])) earned += question.points; }
+        else { const g = Number(ansMap[question.questionId]); if (!isNaN(g) && g === Number(question.correct[0])) earned += question.points; }
+      });
+      const score = totalPoints ? Math.round(earned / totalPoints * 100) : 0;
+      const q = quizById(a.quizId); const passScore = q ? q.passScore : 70;
+      a.score = score; a.passed = score >= passScore; a.status = 'reviewed'; a.feedback = String(feedback || '');
+      if (a.passed) d.pathItems.filter(i => i.quizId === a.quizId).forEach(i => markProgress(a.email, 'item:' + i.itemId, score));
+      logActivity(myEmail(), 'attempt_reviewed', attemptId + ' → ' + score + '٪'); save();
+      return { ok: true, score, passed: a.passed };
+    },
+
+    /* ─── گزارش‌ها ─── */
+    reportSummary(teamKey) {
+      const d = load();
+      const keys = teamKey ? [teamKey] : ['account', 'mlm', 'bnpl', 'telesales'];
+      const users = d.users.filter(u => truthy(u.active));
+      const atts = d.attempts.filter(a => a.status !== 'in_progress');
+      const teams = keys.map(key => {
+        const members = users.filter(u => splitCsv(u.teams).includes(key));
+        const memberEmails = members.map(m => m.email.toLowerCase());
+        const ta = atts.filter(a => memberEmails.includes(String(a.email).toLowerCase()));
+        const avgScore = ta.length ? Math.round(ta.reduce((s, a) => s + Number(a.score || 0), 0) / ta.length) : 0;
+        const items = pathItemsOfAll(key);
+        let sumPercent = 0, completedMembers = 0;
+        members.forEach(m => { const c = completionOf(m.email, key); sumPercent += c.percent; if (c.percent >= 100 && c.total > 0) completedMembers++; });
+        return { key, name: teamRoot(key).name, icon: teamRoot(key).icon, color: teamRoot(key).color, members: members.length, avgCompletion: members.length ? Math.round(sumPercent / members.length) : 0, completedMembers, attempts: ta.length, avgScore, passedAttempts: ta.filter(a => truthy(a.passed)).length, pendingReview: ta.filter(a => a.status === 'pending_review').length };
+      });
+      const totAttempts = teams.reduce((s, t) => s + t.attempts, 0);
+      const totals = { members: teams.reduce((s, t) => s + t.members, 0), attempts: totAttempts, pendingReview: teams.reduce((s, t) => s + t.pendingReview, 0), avgScore: totAttempts ? Math.round(teams.reduce((s, t) => s + t.avgScore * t.attempts, 0) / totAttempts) : 0 };
+      save();
+      return { ok: true, teams, totals };
+
+      function pathItemsOfAll(key) { const d2 = load(); const pathIds = d2.paths.filter(p => p.teamKey === key && truthy(p.active)).map(p => p.pathId); return d2.pathItems.filter(i => pathIds.includes(i.pathId) && truthy(i.active)); }
+      function completionOf(email, key) { const d2 = load(); const items = pathItemsOfAll(key); const pm = {}; d2.progress.forEach(p => { if (p.email.toLowerCase() === email.toLowerCase()) pm[p.pathItemId] = p; }); const done = items.filter(i => pm['item:' + i.itemId]).length; return { total: items.length, done, percent: items.length ? Math.round(done / items.length * 100) : 0 }; }
+    },
+    reportTeamMembers(teamKey) {
+      const d = load();
+      const users = d.users.filter(u => truthy(u.active) && splitCsv(u.teams).includes(teamKey));
+      const pathIds = d.paths.filter(p => p.teamKey === teamKey && truthy(p.active)).map(p => p.pathId);
+      const items = d.pathItems.filter(i => pathIds.includes(i.pathId) && truthy(i.active));
+      const members = users.map(u => {
+        const pm = {}; d.progress.forEach(p => { if (p.email.toLowerCase() === u.email.toLowerCase()) pm[p.pathItemId] = p; });
+        const done = items.filter(i => pm['item:' + i.itemId]).length;
+        const mine = d.attempts.filter(a => String(a.email).toLowerCase() === u.email.toLowerCase() && a.status !== 'in_progress');
+        const avgScore = mine.length ? Math.round(mine.reduce((s, a) => s + Number(a.score || 0), 0) / mine.length) : 0;
+        let last = ''; mine.forEach(a => { if (!last || new Date(a.timestamp) > new Date(last)) last = a.timestamp; });
+        return { email: u.email, name: u.name, role: u.role, completion: items.length ? Math.round(done / items.length * 100) : 0, itemsDone: done, itemsTotal: items.length, attempts: mine.length, avgScore, passed: mine.filter(a => truthy(a.passed)).length, pendingReview: mine.filter(a => a.status === 'pending_review').length, lastActivity: last };
+      }).sort((a, b) => b.completion - a.completion);
+      return { ok: true, members };
+    },
+    reportMember(email) {
+      const d = load(); const target = String(email || '').toLowerCase().trim();
+      const targetUser = d.users.find(u => u.email.toLowerCase() === target) || { email: target, name: target, role: 'learner', teams: '', mentorEmail: '' };
+      const tTeams = splitCsv(targetUser.teams);
+      const pm = {}; d.progress.forEach(p => { if (p.email.toLowerCase() === target) pm[p.pathItemId] = p; });
+      const paths = d.paths.filter(p => truthy(p.active) && tTeams.includes(p.teamKey)).map(p => { const items = pathItemsOf(p.pathId); const done = items.filter(i => pm['item:' + i.itemId]).length; return { pathId: p.pathId, title: p.title, teamKey: p.teamKey, total: items.length, done, percent: items.length ? Math.round(done / items.length * 100) : 0 }; });
+      const qmap = {}; d.quizzes.forEach(q => qmap[q.quizId] = q);
+      const attempts = d.attempts.filter(a => String(a.email).toLowerCase() === target && a.status !== 'in_progress').sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map(a => ({ attemptId: a.attemptId, quizId: a.quizId, quizTitle: (qmap[a.quizId] || {}).title || 'آزمون حذف‌شده', score: a.score, passed: truthy(a.passed), status: a.status, timestamp: a.timestamp, timeSpentSec: a.timeSpentSec || 0, feedback: a.feedback || '' }));
+      const notes = d.mentorNotes.filter(n => String(n.menteeEmail).toLowerCase() === target).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      return { ok: true, member: { email: target, name: targetUser.name, role: targetUser.role, teams: tTeams, mentorEmail: targetUser.mentorEmail || '' }, paths, attempts, notes };
+    },
+    reportIncomplete(teamKey) {
+      const d = load(); const keys = teamKey ? [teamKey] : ['account', 'mlm', 'bnpl', 'telesales'];
+      const rows = [];
+      keys.forEach(key => {
+        const pathIds = d.paths.filter(p => p.teamKey === key && truthy(p.active)).map(p => p.pathId);
+        const items = d.pathItems.filter(i => pathIds.includes(i.pathId) && truthy(i.active));
+        d.users.filter(u => truthy(u.active) && splitCsv(u.teams).includes(key)).forEach(u => {
+          const pm = {}; d.progress.forEach(p => { if (p.email.toLowerCase() === u.email.toLowerCase()) pm[p.pathItemId] = p; });
+          const done = items.filter(i => pm['item:' + i.itemId]).length;
+          const percent = items.length ? Math.round(done / items.length * 100) : 0;
+          if (items.length > 0 && percent < 100) rows.push({ teamKey: key, teamName: teamRoot(key).name, email: u.email, name: u.name, completion: percent, remaining: items.length - done });
+        });
+      });
+      rows.sort((a, b) => a.completion - b.completion);
+      return { ok: true, rows };
+    },
+    reportExportCsv(kind, teamKey) {
+      const d = load();
+      let header = [], lines = [], filename = 'report.csv';
+      const teamSummary = this.reportSummary(teamKey || '').teams;
+      if (kind === 'team_summary') {
+        header = ['تیم', 'تعداد اعضا', 'میانگین تکمیل (%)', 'اعضای تکمیل‌شده', 'تعداد تلاش آزمون', 'میانگین نمره', 'تلاش‌های قبول', 'در انتظار بازبینی'];
+        lines = teamSummary.map(t => [t.name, t.members, t.avgCompletion, t.completedMembers, t.attempts, t.avgScore, t.passedAttempts, t.pendingReview]);
+        filename = 'bimebazar-team-summary.csv';
+      } else if (kind === 'user_progress' || kind === 'incomplete') {
+        header = ['تیم', 'نام', 'ایمیل', 'نقش', 'تکمیل (%)', 'آیتم انجام‌شده', 'کل آیتم‌ها'];
+        const keys = teamKey ? [teamKey] : ['account', 'mlm', 'bnpl', 'telesales'];
+        keys.forEach(key => { const rep = handlers.reportTeamMembers(key); rep.members.forEach(m => { if (kind === 'incomplete' && m.completion >= 100) return; lines.push([teamRoot(key).name, m.name, m.email, m.role, m.completion, m.itemsDone, m.itemsTotal]); }); });
+        filename = kind === 'incomplete' ? 'bimebazar-incomplete.csv' : 'bimebazar-user-progress.csv';
+      } else if (kind === 'attempts') {
+        header = ['تاریخ', 'ایمیل', 'آزمون', 'نمره', 'وضعیت', 'نتیجه', 'زمان (ثانیه)'];
+        const qmap = {}; d.quizzes.forEach(q => qmap[q.quizId] = q);
+        d.attempts.filter(a => a.status !== 'in_progress').forEach(a => lines.push([new Date(a.timestamp).toLocaleString('fa-IR'), a.email, (qmap[a.quizId] || {}).title || '', a.score, a.status, truthy(a.passed) ? 'قبول' : 'رد', a.timeSpentSec || 0]));
+        filename = 'bimebazar-attempts.csv';
+      }
+      const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      const csv = '﻿' + [header].concat(lines).map(r => r.map(esc).join(',')).join('\r\n');
+      return { ok: true, filename, csvBase64: btoa(unescape(encodeURIComponent(csv))) };
+    },
+    addMentorNote(menteeEmail, note) {
+      const d = load();
+      if (!note || !String(note).trim()) throw new Error('متن بازخورد خالی است.');
+      d.mentorNotes.push({ id: uid('NOTE'), timestamp: nowIso(), mentorEmail: myEmail(), menteeEmail: String(menteeEmail).toLowerCase().trim(), note: String(note).trim() });
+      logActivity(myEmail(), 'mentor_note', menteeEmail); save();
+      return { ok: true };
+    },
+
+    /* ─── اعلانات ادمین ─── */
+    adminListAnnouncements() { const d = load(); return { ok: true, announcements: clone(d.announcements).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)) }; },
+    adminSaveAnnouncement(payload) {
+      const d = load();
+      if (!payload.title || !String(payload.title).trim()) throw new Error('عنوان اعلان الزامی است.');
+      if (payload.id) { const ex = d.announcements.find(a => a.id === payload.id); if (!ex) throw new Error('اعلان پیدا نشد.'); Object.assign(ex, { title: payload.title.trim(), body: payload.body || '', audience: payload.audience || 'all', active: payload.active !== false }); save(); return { ok: true, id: ex.id }; }
+      const id = uid('ANN');
+      d.announcements.push({ id, title: String(payload.title).trim(), body: payload.body || '', audience: payload.audience || 'all', active: payload.active !== false, createdAt: nowIso() });
+      logActivity(myEmail(), 'announcement_create', payload.title); save();
+      return { ok: true, id, created: true };
+    },
+    adminDeleteAnnouncement(id) { const d = load(); const i = d.announcements.findIndex(a => a.id === id); if (i === -1) throw new Error('اعلان پیدا نشد.'); d.announcements.splice(i, 1); save(); return { ok: true }; }
+  };
+
+  function request(fn, args) {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          const handler = handlers[fn];
+          if (!handler) throw new Error('تابع «' + fn + '» در حالت پیش‌نمایش پیاده‌سازی نشده است.');
+          resolve(handler.apply(handlers, args || []));
+        } catch (e) { reject(e); }
+      }, 140); // تأخیر مصنوعی برای نمایش واقعی Loading State
+    });
+  }
+
+  return {
+    isDemo: true,
+    request,
+    reset,
+    user: DEMO_USER
+  };
+})();
+</script>

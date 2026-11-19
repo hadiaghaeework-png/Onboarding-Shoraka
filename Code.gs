@@ -1,0 +1,116 @@
+/*******************************************************
+ * آکادمی یادگیری بیمه‌بازار — نقطه ورود
+ * Google Apps Script + Google Drive + Google Sheets
+ *******************************************************/
+
+function doGet() {
+  return HtmlService.createTemplateFromFile('Index')
+    .evaluate()
+    .setTitle('آکادمی یادگیری | بیمه‌بازار')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function include_(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+/**
+ * ساخت/ترمیم ساختار داده‌ها — یک‌بار اجرا کنید.
+ * شیت‌ها را می‌سازد، سرستون‌ها را تصحیح می‌کند و آزمون نمونه را (در صورت نبود) اضافه می‌کند.
+ */
+function setupAcademy_() {
+  let ss;
+  const existing = CONFIG.SPREADSHEET_ID ||
+    PropertiesService.getScriptProperties().getProperty('ACADEMY_SPREADSHEET_ID');
+  if (existing) {
+    ss = SpreadsheetApp.openById(existing);
+  } else {
+    ss = SpreadsheetApp.create('داده‌های آکادمی یادگیری بیمه‌بازار');
+  }
+
+  PropertiesService.getScriptProperties().setProperty('ACADEMY_SPREADSHEET_ID', ss.getId());
+  Object.keys(SHEET_DEFS).forEach(name => ensureSheet_(name, SHEET_DEFS[name]));
+  const usersSheet = sheet_('Users');
+  if (usersSheet.getLastRow() < 2) {
+    const owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase().trim();
+    if (!owner) throw new Error('ایمیل مالک قابل تشخیص نیست؛ مدیر اولیه را در شیت Users ثبت کنید.');
+    usersSheet.appendRow([owner, owner, 'admin', TEAM_CONFIG.map(t => t.key).join(','), '', true, true, nowIso_()]);
+  }
+
+
+  // حذف شیت پیش‌فرض خالی اگر وجود دارد
+  ['Sheet1', 'برگه1', 'Sheet 1'].forEach(n => {
+    const s = ss.getSheetByName(n);
+    if (s && s.getLastRow() === 0) { try { ss.deleteSheet(s); } catch (e) {} }
+  });
+
+  PropertiesService.getScriptProperties().setProperty('ACADEMY_SPREADSHEET_ID', ss.getId());
+  // کش پوشه‌های تیم را نوسازی کن
+  cacheRemove_('team_folders_v1');
+  return ok_({ spreadsheetUrl: ss.getUrl(), message: 'ساختار داده‌های آکادمی آماده شد.' });
+}
+
+/** داده‌ی اولیه اپ — همه‌چیز از بک‌اند و بر اساس هویت و نقش کاربر */
+function getBootstrap() {
+  const user = getUserContext();
+  if (CONFIG.LOG_LOGINS) logActivity_(user.email, 'login', 'boot');
+
+  // تیم‌ها از Drive (در حالت دمو نیز واقعی است)
+  let teams = [], rootName = '', driveError = '';
+  try {
+    rootName = Drive.Files.get(CONFIG.ROOT_FOLDER_ID, { fields: 'name', supportsAllDrives: true }).name;
+    teams = findTeamFolders_(user);
+  } catch (e) {
+    driveError = e.message || String(e);
+  }
+
+  // مسیرهای من + آمار واقعی
+  const myPathsResp = listMyPaths('');
+  const myPaths = myPathsResp.paths || [];
+  const agg = myPaths.reduce((a, p) => ({ total: a.total + p.total, done: a.done + p.done }), { total: 0, done: 0 });
+
+  // آزمون‌های در انتظار (آیتم‌های مسیر که آزمون دارند و هنوز قبول نشده‌اند)
+  const progress = getMyProgressMap_(user.email);
+  const attempts = rows_('Attempts').filter(a => String(a.Email).toLowerCase() === user.email && truthy_(a.Passed));
+  const passedQuizzes = {};
+  attempts.forEach(a => { passedQuizzes[String(a.QuizId)] = true; });
+  let pendingQuizzes = 0;
+  myPaths.forEach(p => {
+    itemsOfPath_(p.pathId).forEach(i => {
+      const qid = String(i.QuizId || '');
+      if (qid && !passedQuizzes[qid] && !progress['item:' + String(i.ItemId)]) pendingQuizzes++;
+    });
+  });
+
+  // فعالیت‌های اخیر کاربر
+  const recent = rows_('Activity')
+    .filter(a => String(a.Email).toLowerCase() === user.email)
+    .sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp))
+    .slice(0, 6)
+    .map(a => ({ action: String(a.Action), detail: String(a.Detail || ''), timestamp: a.Timestamp }));
+
+  // اعلانات
+  const ann = listAnnouncements().announcements;
+
+  return ok_({
+    user: user,
+    drive: { rootName: rootName, error: driveError },
+    teams: teams,
+    stats: {
+      teams: teams.length,
+      paths: myPaths.length,
+      totalItems: agg.total,
+      completedItems: agg.done,
+      completionPercent: agg.total ? Math.round(agg.done / agg.total * 100) : 0,
+      pendingQuizzes: pendingQuizzes,
+      totalAttempts: rows_('Attempts').filter(a => String(a.Email).toLowerCase() === user.email && String(a.Status) !== 'in_progress').length
+    },
+    activePaths: myPaths.filter(p => p.percent < 100).slice(0, 4),
+    allPaths: myPaths,
+    recommended: myPaths.filter(p => p.done === 0 && p.total > 0).slice(0, 3),
+    recentActivity: recent,
+    announcements: ann,
+    pageSize: CONFIG.PAGE_SIZE,
+    roleLabels: ROLE_LABELS
+  });
+}

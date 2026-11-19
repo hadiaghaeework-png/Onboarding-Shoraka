@@ -1,0 +1,1030 @@
+<script>
+/* ════════════════════════════════════════════════════════════
+   BimeBazar Learning Academy — برنامه فرانت‌اند (SPA)
+   ════════════════════════════════════════════════════════════ */
+const App = (() => {
+  'use strict';
+
+  /* ───────── حالت سراسری ───────── */
+  const state = {
+    user: null,
+    teams: [],
+    pageSize: 12,
+    view: 'dashboard',
+    params: {},
+    bootstrap: null,
+    theme: 'light',
+    library: null,          // { teamKey, folderStack:[], page, pageTokens, nextToken, search, type, reqId }
+    quiz: null,             // جلسه آزمون فعال
+    timers: []
+  };
+
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmtDate = ts => { try { if (!ts) return '—'; return new Date(ts).toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' }); } catch (e) { return ''; } };
+  const fmtDateTime = ts => { try { if (!ts) return '—'; return new Date(ts).toLocaleString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
+  const fmtNum = n => Number(n || 0).toLocaleString('fa-IR');
+  const isDemo = () => !window.google || !window.google.script || !window.google.script.run;
+  const initials = s => { const p = String(s || '؟').trim().split(/\s+/); return ((p[0] || '؟')[0] || '؟') + ((p[1] || '')[0] || ''); };
+  const clearTimers = () => { state.timers.forEach(t => clearInterval(t)); state.timers = []; };
+
+  /* ───────── پل ارتباطی با بک‌اند ───────── */
+  const pendingReads = new Map();
+  const readOnly = new Set(['getBootstrap', 'listMyPaths', 'getPath', 'getLibraryPage', 'getMyTranscript', 'listAnnouncements']);
+  function callServer(fn) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    const key = readOnly.has(fn) ? JSON.stringify([fn, args]) : null;
+    if (key && pendingReads.has(key)) return pendingReads.get(key);
+    let request;
+    if (!isDemo()) {
+      request = new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(err => reject(new Error((err && err.message) || String(err) || 'خطای ناشناخته در سرور')))
+          [fn].apply(null, args);
+      });
+    } else {
+      request = DemoAPI.request(fn, args).catch(err => { throw new Error((err && err.message) || String(err)); });
+    }
+    if (key) { pendingReads.set(key, request); request.then(() => pendingReads.delete(key), () => pendingReads.delete(key)); }
+    return request;
+  }
+
+  /* ───────── مودال ───────── */
+  const overlay = () => $('#overlay');
+  function openModal(opts) {
+    opts = opts || {};
+    $('#modalTitle').innerHTML = opts.title || '';
+    const body = $('#modalBody');
+    body.innerHTML = opts.bodyHTML || '';
+    const foot = $('#modalFoot');
+    if (opts.footHTML) { foot.hidden = false; foot.innerHTML = opts.footHTML; }
+    else { foot.hidden = true; foot.innerHTML = ''; }
+    const box = $('#modalBox');
+    box.className = 'modal' + (opts.size ? ' modal-' + opts.size : '');
+    overlay().classList.add('open');
+    overlay().setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    if (opts.onMount) { try { opts.onMount(body, foot); } catch (e) { console.error(e); } }
+    const f = body.querySelector('input,select,textarea,button'); if (f) f.focus();
+  }
+  function closeModal() {
+    overlay().classList.remove('open');
+    overlay().setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    clearTimers();
+    const body = $('#modalBody'); body.innerHTML = '';
+  }
+  function confirmModal(opts) {
+    opts = opts || {};
+    openModal({
+      title: esc(opts.title || 'تأیید'),
+      bodyHTML: '<div style="font-size:13px;line-height:2">' + (opts.bodyHTML || esc(opts.message || 'مطمئن هستید؟')) + '</div>',
+      footHTML: '<button class="btn btn-soft" data-close>انصراف</button><button class="btn ' + (opts.danger ? 'btn-danger' : 'btn-primary') + '" id="confirmYesBtn">' + esc(opts.confirmLabel || 'تأیید') + '</button>',
+      onMount: (body, foot) => {
+        $('#confirmYesBtn', foot).addEventListener('click', () => { closeModal(); if (opts.onConfirm) opts.onConfirm(); });
+      }
+    });
+  }
+
+  /* ───────── toast ───────── */
+  let toastTimer = null;
+  function toast(msg, type) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (type === 'error' ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.className = 'toast'; }, type === 'error' ? 4200 : 2600);
+  }
+
+  /* ───────── ابزارهای رندر ───────── */
+  function loadingHTML(text) {
+    return '<div class="loading full-span"><div class="spinner"></div><span>' + esc(text || 'در حال بارگذاری…') + '</span></div>';
+  }
+  function errorHTML(msg, retry) {
+    return '<div class="error-box full-span"><strong>مشکلی پیش آمد</strong><p style="margin:8px 0 0;font-size:12px">' + esc(msg) + '</p>' + (retry ? '<div style="margin-top:12px"><button class="btn btn-soft btn-sm" id="retryBtn">تلاش دوباره</button></div>' : '') + '</div>';
+  }
+  function emptyHTML(icon, title, sub) {
+    return '<div class="empty full-span"><span class="empty-ic">' + icon + '</span><h4>' + esc(title) + '</h4><p style="margin:4px 0 0;font-size:12px">' + esc(sub || '') + '</p></div>';
+  }
+  function progressHTML(percent) {
+    const p = Math.max(0, Math.min(100, Number(percent) || 0));
+    return '<div class="progress-bar"><div class="progress-fill" style="width:' + p + '%"></div></div>';
+  }
+
+  const ACTION_LABELS = { quiz_submit: 'شرکت در آزمون', path_item_complete: 'تکمیل مرحله', item_complete: 'مشاهده محتوا', login: 'ورود به سامانه', mentor_note: 'ثبت بازخورد', attempt_reviewed: 'بازبینی آزمون', user_create: 'ایجاد کاربر', user_update: 'ویرایش کاربر', path_create: 'ایجاد مسیر', announcement_create: 'ایجاد اعلان' };
+  const TEAM_COLORS = { blue: '#2f6fed', orange: '#e07b1a', green: '#1a9e6b', purple: '#7c3aed' };
+
+  /* ───────── پوسته: سایدبار و نوار بالا ───────── */
+  const NAV = [
+    { key: 'dashboard', label: 'داشبورد', icon: 'M3 12l9-8 9 8M5 10v10h14V10', roles: ['admin', 'team_manager', 'mentor', 'learner'] },
+    { key: 'teams', label: 'تیم‌های من', icon: 'M4 19a8 8 0 0 1 16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8', roles: ['admin', 'team_manager', 'mentor', 'learner'] },
+    { key: 'library', label: 'کتابخانه محتوا', icon: 'M4 5h6v14H4zM14 5h6v14h-6zM4 9h6M14 9h6', roles: ['admin', 'team_manager', 'mentor', 'learner'] },
+    { key: 'transcript', label: 'کارنامه من', icon: 'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M9 12l2 2 4-4', roles: ['admin', 'team_manager', 'mentor', 'learner'] },
+    { key: 'admin', label: 'پنل مدیریت', icon: 'M12 3l8 4v5c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V7z', roles: ['admin', 'team_manager', 'mentor'] }
+  ];
+  const ICONS = {
+    folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+    file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z M14 3v5h5',
+    clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M12 7v5l3 2',
+    check: 'M4 12l5 5L20 6',
+    lock: 'M6 11V8a6 6 0 0 1 12 0v3M5 11h14v10H5z',
+    play: 'M8 5v14l11-7z',
+    chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+    users: 'M4 19a8 8 0 0 1 16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
+    download: 'M12 3v12M6 11l6 6 6-6M4 21h16',
+    search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16M21 21l-4.3-4.3',
+    bell: 'M18 9a6 6 0 1 0-12 0c0 6-2 6-2 8h16c0-2-2-2-2-8M10 21a2 2 0 0 0 4 0'
+  };
+  const svgIcon = (path, cls) => '<svg class="' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true"><path d="' + path + '"/></svg>';
+
+  function renderSidebar() {
+    const role = state.user ? state.user.role : 'learner';
+    $('#sideNav').innerHTML = NAV.filter(n => n.roles.indexOf(role) !== -1).map(n =>
+      '<button class="nav-item" data-nav="' + n.key + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + n.icon + '"/></svg><span>' + esc(n.label) + '</span></button>'
+    ).join('');
+    $$('#sideNav .nav-item').forEach(btn => btn.addEventListener('click', () => { go(btn.getAttribute('data-nav')); closeSidebar(); }));
+    markActiveNav();
+  }
+  function markActiveNav() {
+    $$('#sideNav .nav-item').forEach(b => b.classList.toggle('active', b.getAttribute('data-nav') === state.view));
+  }
+  function openSidebar() { $('#sidebar').classList.add('open'); $('#scrim').classList.add('show'); }
+  function closeSidebar() { $('#sidebar').classList.remove('open'); $('#scrim').classList.remove('show'); }
+
+  const VIEW_TITLES = { dashboard: ['داشبورد', 'خوش آمدید؛ مسیر یادگیری شما در یک نگاه'], teams: ['تیم‌های من', 'فضای آموزشی مستقل هر تیم'], team: ['تیم', 'مسیرهای یادگیری و محتوای تیم'], library: ['کتابخانه محتوا', 'فایل‌ها و مستندات آموزشی Drive'], path: ['مسیر یادگیری', 'مراحل مرحله‌بندی‌شده با پیشرفت شما'], transcript: ['کارنامه من', 'تاریخچه و نتایج آزمون‌های شما'], admin: ['پنل مدیریت', 'مدیریت کاربران، محتوا، آزمون و گزارش‌ها'] };
+
+  function go(view, params) {
+    state.view = view; state.params = params || {};
+    clearTimers();
+    const meta = VIEW_TITLES[view] || VIEW_TITLES.dashboard;
+    $('#topTitle').textContent = meta[0];
+    $('#topSub').textContent = meta[1];
+    markActiveNav();
+    window.scrollTo(0, 0);
+    const fn = VIEWS[view];
+    const viewEl = $('#view');
+    if (!fn) { viewEl.innerHTML = emptyHTML('🧭', 'صفحه پیدا نشد', ''); return; }
+    viewEl.innerHTML = loadingHTML('در حال بارگذاری…');
+    Promise.resolve(fn(state.params)).catch(err => { viewEl.innerHTML = errorHTML(err.message, true); const rb = $('#retryBtn'); if (rb) rb.addEventListener('click', () => go(view, params)); });
+  }
+
+  const VIEWS = {};
+
+  /* ════════════════════════════════════════
+     داشبورد
+     ════════════════════════════════════════ */
+  VIEWS.dashboard = async () => {
+    const b = state.bootstrap || await callServer('getBootstrap');
+    state.bootstrap = b;
+    state.teams = b.teams || [];
+    paintChrome(b);
+
+    const u = b.user, s = b.stats;
+    const active = b.activePaths || [];
+    const ann = b.announcements || [];
+    const recent = b.recentActivity || [];
+    const recommended = b.recommended || [];
+    const firstName = String(u.name || u.email).split(' ')[0];
+
+    let html = '';
+    // هیرو
+    html += '<section class="hero"><img class="hero-watermark" src="' + BRAND.mark + '" alt="" aria-hidden="true">'
+      + '<div class="hero-content"><span class="hero-kicker">✦ مسیر یادگیری هوشمند</span>'
+      + '<h2>سلام ' + esc(firstName) + '، به آکادمی بیمه‌بازار خوش اومدی 👋</h2>'
+      + '<p>محتوای آموزشی، آزمون و پیشرفت یادگیری تیم شما در یک فضای یکپارچه — دقیقاً مطابق مسیر یادگیری تعیین‌شده.</p>'
+      + '<div class="hero-cta">'
+      + (active.length ? '<button class="btn btn-primary" data-action="resume-path">ادامه یادگیری ←</button>' : '<button class="btn btn-primary" data-action="go-teams">مرور تیم‌ها و مسیرها ←</button>')
+      + '<button class="btn btn-soft" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:#fdf6dd" data-action="go-library">کتابخانه آموزشی</button>'
+      + '</div></div>'
+      + '<div class="hero-progress"><strong>' + fmtNum(s.completionPercent) + '٪</strong><small>پیشرفت کلی شما</small>' + progressHTML(s.completionPercent) + '</div>'
+      + '</section>';
+
+    // آمار واقعی از بک‌اند
+    html += '<section class="stats" aria-label="آمار یادگیری">'
+      + statCard('gold', '◈', 'تیم‌های در دسترس', fmtNum(s.teams), 'بر اساس سطح دسترسی شما')
+      + statCard('ok', '✓', 'مراحل تکمیل‌شده', fmtNum(s.completedItems) + ' <small style="font-size:12px;color:var(--muted)">/ ' + fmtNum(s.totalItems) + '</small>', 'از کل مراحل مسیرهای شما')
+      + statCard('warn', '✎', 'آزمون‌های در انتظار', fmtNum(s.pendingQuizzes), 'آزمون‌هایی که هنوز قبول نشده‌اید')
+      + statCard('accent', '▣', 'تلاش‌های آزمون', fmtNum(s.totalAttempts), 'مجموع شرکت شما در آزمون‌ها')
+      + '</section>';
+
+    html += '<div class="grid-2"><div style="display:grid;gap:16px">';
+
+    // مسیر یادگیری فعال
+    html += '<section class="panel"><div class="section-head" style="margin:0 0 12px"><h3>مسیر یادگیری فعال</h3><button class="btn btn-ghost btn-sm" data-action="go-teams">همه تیم‌ها ←</button></div>';
+    if (!active.length) {
+      html += emptyHTML('🎓', s.paths ? 'همه مسیرهای شما تکمیل شده‌اند 🎉' : 'هنوز مسیری تعریف نشده است', s.paths ? 'آفرین! کارنامه و آزمون‌های خود را از بخش کارنامه ببینید.' : 'مدیر سامانه مسیرها را تعریف می‌کند؛ پس از تعریف، اینجا نمایش داده می‌شود.');
+    } else {
+      html += active.map(p =>
+        '<div class="pstep" style="grid-template-columns:52px 1fr auto;margin-bottom:10px"><div class="pstep-index" style="background:var(--brand-yellow-soft);color:var(--primary-hover)">' + esc(p.teamIcon || '◈') + '</div>'
+        + '<div class="pstep-body"><h4>' + esc(p.title) + '</h4><div class="pstep-meta"><span>' + esc(p.teamName) + '</span><span>' + fmtNum(p.done) + ' از ' + fmtNum(p.total) + ' مرحله</span></div>'
+        + '<div style="margin-top:8px">' + progressHTML(p.percent) + '</div></div>'
+        + '<div class="pstep-actions"><span class="tag tag-gold">' + fmtNum(p.percent) + '٪</span><button class="btn btn-navy btn-sm" data-open-path="' + esc(p.pathId) + '">ادامه</button></div></div>'
+      ).join('');
+    }
+    html += '</section>';
+
+    // آموزش‌های پیشنهادی
+    if (recommended.length) {
+      html += '<section class="panel"><div class="section-head" style="margin:0 0 12px"><h3>پیشنهاد برای شروع</h3><small>مسیرهایی که هنوز شروع نکرده‌اید</small></div><div style="display:grid;gap:10px">'
+        + recommended.map(p => '<div class="ann-item"><div class="ann-ic">' + esc(p.teamIcon || '◈') + '</div><div style="flex:1;min-width:0"><h5>' + esc(p.title) + '</h5><p>' + esc(p.description || '') + '</p></div><button class="btn btn-soft btn-sm" data-open-path="' + esc(p.pathId) + '">شروع ←</button></div>').join('')
+        + '</div></section>';
+    }
+    html += '</div><div style="display:grid;gap:16px">';
+
+    // اعلانات
+    html += '<section class="panel"><div class="section-head" style="margin:0 0 12px"><h3>اعلانات</h3><span class="tag tag-gold">' + fmtNum(ann.length) + '</span></div>';
+    html += ann.length ? '<div style="display:grid;gap:10px">' + ann.map(a => '<div class="ann-item"><div class="ann-ic">🔔</div><div style="min-width:0"><h5>' + esc(a.title) + '</h5><p>' + esc(a.body) + '</p><time>' + fmtDateTime(a.createdAt) + '</time></div></div>').join('') + '</div>' : '<p class="hint">اعلانی ثبت نشده است.</p>';
+    html += '</section>';
+
+    // آخرین فعالیت‌ها
+    html += '<section class="panel"><div class="section-head" style="margin:0 0 12px"><h3>آخرین فعالیت‌های من</h3><button class="btn btn-ghost btn-sm" data-action="go-transcript">کارنامه ←</button></div>';
+    html += recent.length ? '<div class="activity">' + recent.map(a => '<div class="activity-row"><time>' + fmtDateTime(a.timestamp) + '</time><span><strong>' + esc(ACTION_LABELS[a.action] || a.action) + '</strong>' + (a.detail ? ' — ' + esc(a.detail) : '') + '</span></div>').join('') + '</div>' : '<p class="hint">هنوز فعالیتی ثبت نشده است.</p>';
+    html += '</section>';
+
+    html += '</div></div>'; // grid-2
+
+    // دسترسی سریع
+    html += '<section class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">'
+      + '<div><h3 style="margin:0;font-size:14px">دسترسی سریع</h3><p class="hint" style="margin:2px 0 0">پرکاربردترین بخش‌های آکادمی</p></div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      + quickBtn('go-library', '▤ کتابخانه') + quickBtn('go-transcript', '▥ کارنامه من') + quickBtn('go-teams', '◇ تیم‌های من')
+      + (state.user.role !== 'learner' ? quickBtn('go-admin', '⚙ پنل مدیریت') : '')
+      + '</div></section>';
+
+    $('#view').innerHTML = html;
+    bindDashboardActions(active);
+    return;
+  };
+
+  function statCard(kind, icon, label, num, foot) {
+    return '<div class="stat ' + kind + '"><span class="stat-ic">' + icon + '</span><span class="stat-label">' + esc(label) + '</span><strong class="stat-num">' + num + '</strong><span class="stat-foot">' + esc(foot) + '</span></div>';
+  }
+  function quickBtn(action, label) { return '<button class="btn btn-soft" data-action="' + action + '">' + label + '</button>'; }
+
+  function bindDashboardActions(active) {
+    $$('#view [data-action]').forEach(btn => btn.addEventListener('click', () => {
+      const a = btn.getAttribute('data-action');
+      if (a === 'resume-path' && active[0]) go('path', { pathId: active[0].pathId });
+      else if (a === 'go-teams') go('teams');
+      else if (a === 'go-library') go('library');
+      else if (a === 'go-transcript') go('transcript');
+      else if (a === 'go-admin') go('admin');
+    }));
+    $$('#view [data-open-path]').forEach(btn => btn.addEventListener('click', () => go('path', { pathId: btn.getAttribute('data-open-path') })));
+  }
+
+  async function paintChrome(b) {
+    state.user = b.user;
+    const u = b.user;
+    $('#sideAvatar').textContent = initials(u.name || u.email);
+    $('#sideName').textContent = u.name || u.email;
+    $('#sideRole').textContent = u.roleLabel || u.role;
+    $('#demoBanner').hidden = !u.demo;
+    renderSidebar();
+    // نشان اعلان
+    try {
+      const resp = b.announcements ? { announcements: b.announcements } : await callServer('listAnnouncements');
+      const n = (resp.announcements || []).length;
+      const badge = $('#bellBadge');
+      badge.hidden = n === 0; badge.textContent = fmtNum(n);
+    } catch (e) { /* نشان اختیاری است */ }
+  }
+
+  /* ════════════════════════════════════════
+     تیم‌ها
+     ════════════════════════════════════════ */
+  VIEWS.teams = async () => {
+    const b = state.bootstrap || await callServer('getBootstrap');
+    paintChromeIfNeeded(b);
+    const teams = b.teams || [];
+    if (!teams.length) {
+      $('#view').innerHTML = emptyHTML('🏢', 'برای حساب شما تیمی تعریف نشده است', 'اگر فکر می‌کنید اشتباهی رخ داده، با مدیر سامانه تماس بگیرید.');
+      return;
+    }
+    // آمار هر تیم (مسیرها و پیشرفت) — به‌صورت موازی
+    const stats = await Promise.all(teams.map(t =>
+      callServer('listMyPaths', t.key).then(r => ({ key: t.key, paths: r.paths || [] }))
+    ));
+    const byKey = {}; stats.forEach(s => byKey[s.key] = s.paths);
+
+    let html = '<div class="section-head"><h3>تیم‌های در دسترس شما</h3><small>نمایش بر اساس سطح دسترسی — هر تیم فضای آموزشی مستقل دارد</small></div>'
+      + '<div class="teams">' + teams.map(t => {
+        const paths = byKey[t.key] || [];
+        const totalItems = paths.reduce((s, p) => s + p.total, 0);
+        const avg = paths.length ? Math.round(paths.reduce((s, p) => s + p.percent, 0) / paths.length) : 0;
+        const color = TEAM_COLORS[t.color] || '#edbe46';
+        return '<button class="team-card" data-team="' + esc(t.key) + '" style="--team-accent:' + color + '">'
+          + '<div class="team-symbol">' + esc(t.icon || '◈') + '</div>'
+          + '<h4>تیم ' + esc(t.name) + '</h4>'
+          + '<p>کتابخانه، مسیرهای یادگیری و آزمون‌های اختصاصی تیم ' + esc(t.name) + '</p>'
+          + '<div class="team-meta"><span>' + fmtNum(paths.length) + ' مسیر یادگیری</span><span>' + fmtNum(totalItems) + ' مرحله آموزشی</span></div>'
+          + '<div class="team-progress"><div class="tp-row"><span>پیشرفت شما در این تیم</span><span>' + fmtNum(avg) + '٪</span></div><div class="tp-bar"><div class="tp-fill" style="width:' + avg + '%"></div></div></div>'
+          + '<div class="team-go"><span>ورود به فضای تیم</span><span>←</span></div>'
+          + '</button>';
+      }).join('') + '</div>';
+    $('#view').innerHTML = html;
+    $$('#view [data-team]').forEach(btn => btn.addEventListener('click', () => go('team', { teamKey: btn.getAttribute('data-team') })));
+  };
+
+  function paintChromeIfNeeded(b) { if (b && b.user) { state.bootstrap = b; state.teams = b.teams || []; paintChrome(b); } }
+
+  /* ════════════════════════════════════════
+     جزئیات تیم (مسیرها + محتوا)
+     ════════════════════════════════════════ */
+  VIEWS.team = async (params) => {
+    const teamKey = params.teamKey;
+    const b = state.bootstrap || await callServer('getBootstrap');
+    paintChromeIfNeeded(b);
+    const team = (b.teams || []).find(t => t.key === teamKey);
+    if (!team) { $('#view').innerHTML = errorHTML('به این تیم دسترسی ندارید یا وجود ندارد.'); return; }
+    const pathsResp = await callServer('listMyPaths', teamKey);
+    const paths = pathsResp.paths || [];
+    const tab = params.tab || 'paths';
+
+    let html = '<section class="path-header" style="--team-accent:' + (TEAM_COLORS[team.color] || '#edbe46') + '">'
+      + '<div class="team-symbol" style="margin:0;background:color-mix(in srgb,' + (TEAM_COLORS[team.color] || '#edbe46') + ' 16%,var(--panel));color:' + (TEAM_COLORS[team.color] || '#d9a72e') + '">' + esc(team.icon) + '</div>'
+      + '<div class="path-header-main"><h2>تیم ' + esc(team.name) + '</h2><p>مسیرهای یادگیری و محتوای آموزشی اختصاصی این تیم</p></div>'
+      + '<div class="pstep-actions"><span class="tag tag-muted">' + fmtNum(paths.length) + ' مسیر</span></div>'
+      + '</section>';
+
+    html += '<div class="tabs" role="tablist">'
+      + '<button class="tab' + (tab === 'paths' ? ' active' : '') + '" data-tab="paths">مسیرهای یادگیری <span class="tab-count">' + fmtNum(paths.length) + '</span></button>'
+      + '<button class="tab' + (tab === 'content' ? ' active' : '') + '" data-tab="content">محتوای تیم</button>'
+      + '</div>';
+
+    html += '<div id="teamTabBody">';
+    if (tab === 'paths') {
+      html += paths.length ? '<div style="display:grid;gap:12px">' + paths.map(p =>
+        '<div class="pstep" style="grid-template-columns:52px 1fr auto"><div class="pstep-index">' + esc(team.icon) + '</div>'
+        + '<div class="pstep-body"><h4>' + esc(p.title) + '</h4><div class="pstep-meta"><span>' + esc(p.description || '') + '</span></div>'
+        + '<div class="progress-big" style="margin-top:10px"><div style="flex:1">' + progressHTML(p.percent) + '</div><span class="pb-num">' + fmtNum(p.percent) + '٪</span></div>'
+        + '<div class="pstep-meta" style="margin-top:6px"><span>' + fmtNum(p.done) + ' از ' + fmtNum(p.total) + ' مرحله تکمیل شده</span></div>'
+        + '</div><div class="pstep-actions"><button class="btn btn-primary btn-sm" data-open-path="' + esc(p.pathId) + '">' + (p.done ? 'ادامه مسیر' : 'شروع مسیر') + '</button></div></div>'
+      ).join('') + '</div>' : emptyHTML('🧭', 'هنوز مسیری برای این تیم تعریف نشده است', 'مدیر سامانه می‌تواند از پنل مدیریت مسیر تعریف کند.');
+    } else {
+      html += '<div id="teamLibraryMount"></div>';
+    }
+    html += '</div>';
+
+    $('#view').innerHTML = html;
+    $$('#view .tab').forEach(btn => btn.addEventListener('click', () => go('team', { teamKey: teamKey, tab: btn.getAttribute('data-tab') })));
+    $$('#view [data-open-path]').forEach(btn => btn.addEventListener('click', () => go('path', { pathId: btn.getAttribute('data-open-path') })));
+    if (tab === 'content') {
+      const mount = $('#teamLibraryMount');
+      renderLibraryBrowser(mount, { teamKey: teamKey, embedded: true });
+    }
+  };
+
+  /* ════════════════════════════════════════
+     مرورگر کتابخانه (مشترک: نمای کتابخانه + تب تیم)
+     ════════════════════════════════════════ */
+  function renderLibraryBrowser(mount, opts) {
+    opts = opts || {};
+    const embedded = !!opts.embedded;
+    const lib = {
+      teamKey: opts.teamKey || (state.teams[0] && state.teams[0].key) || 'account',
+      folderStack: [],   // [{id,name}]
+      page: 1,
+      pageTokens: [''],
+      nextToken: '',
+      search: '',
+      type: 'all',
+      reqId: 0
+    };
+    const teams = state.teams || [];
+
+    let html = '<div class="library-toolbar">';
+    if (!embedded) {
+      html += '<select class="filter" id="libTeam" aria-label="انتخاب تیم">' + teams.map(t => '<option value="' + esc(t.key) + '"' + (t.key === lib.teamKey ? ' selected' : '') + '>تیم ' + esc(t.name) + '</option>').join('') + '</select>';
+    } else {
+      html += '<span class="tag tag-gold">محتوای تیم ' + esc((teams.find(t => t.key === lib.teamKey) || {}).name || lib.teamKey) + '</span>';
+    }
+    html += '<input class="filter" id="libSearch" type="search" placeholder="جست‌وجو در این پوشه…" style="min-width:180px" aria-label="جست‌وجو">'
+      + '<select class="filter" id="libType" aria-label="فیلتر نوع"><option value="all">همه موارد</option><option value="folder">فقط پوشه‌ها</option><option value="file">فقط فایل‌ها</option></select>'
+      + '<span class="hint" id="libCount" style="margin-inline-start:auto"></span>'
+      + '</div>'
+      + '<nav class="crumbs" id="libCrumbs" aria-label="مسیر پوشه"></nav>'
+      + '<div class="items" id="libItems">' + loadingHTML('در حال دریافت محتوا…') + '</div>'
+      + '<div class="pagination"><span id="libInfo">—</span><div class="pages">'
+      + '<button id="libPrev" disabled>قبلی</button><span class="page-now" id="libPage">۱</span><button id="libNext" disabled>بعدی</button>'
+      + '</div></div>';
+    mount.innerHTML = html;
+
+    const itemsEl = $('#libItems', mount), crumbsEl = $('#libCrumbs', mount);
+    const teamSel = $('#libTeam', mount), searchEl = $('#libSearch', mount), typeSel = $('#libType', mount);
+
+    function renderCrumbs() {
+      const team = (state.teams || []).find(t => t.key === lib.teamKey);
+      const rootName = team ? team.name : 'ریشه';
+      let out = '<button data-crumb="-1">' + esc(rootName) + '</button>';
+      lib.folderStack.forEach((f, i) => { out += '<span class="sep">›</span><button data-crumb="' + i + '">' + esc(f.name) + '</button>'; });
+      crumbsEl.innerHTML = out;
+      $$('button', crumbsEl).forEach(btn => btn.addEventListener('click', () => {
+        const i = parseInt(btn.getAttribute('data-crumb'), 10);
+        if (i === -1) lib.folderStack = []; else lib.folderStack = lib.folderStack.slice(0, i + 1);
+        lib.page = 1; lib.pageTokens = ['']; load();
+      }));
+    }
+
+    function currentFolderId() { return lib.folderStack.length ? lib.folderStack[lib.folderStack.length - 1].id : ''; }
+
+    async function load() {
+      const reqId = ++lib.reqId;
+      itemsEl.innerHTML = loadingHTML('در حال دریافت محتوا…');
+      $('#libPrev', mount).disabled = true; $('#libNext', mount).disabled = true;
+      renderCrumbs();
+      try {
+        const resp = await callServer('getLibraryPage', currentFolderId(), lib.pageTokens[lib.page - 1] || '', lib.search, lib.type, lib.teamKey);
+        if (reqId !== lib.reqId) return; // پاسخ قدیمی — نادیده بگیر
+        const items = resp.items || [];
+        lib.nextToken = resp.nextPageToken || '';
+        if (lib.nextToken) lib.pageTokens[lib.page] = lib.nextToken;
+        $('#libInfo', mount).textContent = 'نمایش ' + fmtNum(items.length) + ' مورد در این صفحه';
+        $('#libCount', mount).textContent = items.length ? 'صفحه ' + fmtNum(lib.page) : '';
+        $('#libPage', mount).textContent = fmtNum(lib.page);
+        $('#libPrev', mount).disabled = lib.page <= 1;
+        $('#libNext', mount).disabled = !lib.nextToken;
+        if (!items.length) { itemsEl.innerHTML = emptyHTML('🔍', 'محتوایی پیدا نشد', lib.search ? 'عبارت جست‌وجو را تغییر دهید.' : 'این پوشه خالی است.'); return; }
+        itemsEl.innerHTML = items.map(renderItemCard).join('');
+        $$('.item', itemsEl).forEach(card => wireItemCard(card, lib));
+      } catch (err) {
+        if (reqId !== lib.reqId) return;
+        itemsEl.innerHTML = errorHTML(err.message, true);
+        const rb = $('#retryBtn', itemsEl); if (rb) rb.addEventListener('click', load);
+      }
+    }
+
+    let searchTimer = null;
+    lib._reload = load;
+    if (teamSel) teamSel.addEventListener('change', () => { lib.teamKey = teamSel.value; lib.folderStack = []; lib.page = 1; lib.pageTokens = ['']; load(); });
+    searchEl.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { lib.search = searchEl.value.trim(); lib.page = 1; lib.pageTokens = ['']; load(); }, 350); });
+    typeSel.addEventListener('change', () => { lib.type = typeSel.value; lib.page = 1; lib.pageTokens = ['']; load(); });
+    $('#libPrev', mount).addEventListener('click', () => { if (lib.page > 1) { lib.page--; load(); } });
+    $('#libNext', mount).addEventListener('click', () => { if (lib.nextToken) { lib.page++; load(); } });
+
+    load();
+    return lib;
+  }
+  function renderItemCard(item) {
+    const isFolder = item.kind === 'folder';
+    const quiz = item.quiz && item.quiz.available;
+    const done = item.status === 'completed';
+    const iconLabel = isFolder ? '📁' : ({ PDF: 'PDF', VIDEO: '▶ MP4', IMAGE: 'IMG', SHEET: 'XLS', DOC: 'DOC', SLIDES: 'PPT', AUDIO: 'AUD', ARCHIVE: 'ZIP', TEXT: 'TXT', FILE: 'FILE' }[item.icon] || 'FILE');
+    return '<article class="item" data-id="' + esc(item.id) + '" data-kind="' + (isFolder ? 'folder' : 'file') + '" data-name="' + esc(item.name) + '" data-url="' + esc(item.url || '') + '" data-preview="' + esc(item.previewUrl || '') + '" data-mime="' + esc(item.mimeType || '') + '" data-quiz="' + (quiz ? esc(item.quiz.quizId || '1') : '') + '" data-size="' + esc(item.size || '') + '" data-modified="' + esc(item.modified || '') + '">'
+      + '<span class="status-dot' + (done ? ' done' : '') + '" title="' + (done ? 'تکمیل‌شده' : 'مشاهده نشده') + '"></span>'
+      + '<div class="item-top"><div class="file-icon' + (isFolder ? ' folder' : '') + '">' + iconLabel + '</div><span class="tag ' + (isFolder ? 'tag-folder' : 'tag-muted') + '">' + (isFolder ? 'پوشه' : esc(item.icon || 'FILE')) + '</span></div>'
+      + '<h4>' + esc(item.name) + '</h4>'
+      + '<small>' + (isFolder ? 'ورود به محتوای پوشه' : esc(item.size || 'فایل آموزشی')) + (item.modified ? ' • ' + fmtDate(item.modified) : '') + '</small>'
+      + '<div class="item-actions">'
+      + (isFolder ? '<button class="btn btn-navy btn-sm" data-act="open">مشاهده پوشه</button>' : '<button class="btn btn-soft btn-sm" data-act="preview">پیش‌نمایش</button>')
+      + (quiz ? '<button class="btn btn-primary btn-sm" data-act="quiz">شروع آزمون</button>' : '')
+      + '</div></article>';
+  }
+  function wireItemCard(card, lib) {
+    const d = card.dataset;
+    const reload = () => { lib.page = 1; lib.pageTokens = ['']; if (lib._reload) lib._reload(); };
+    const act = (name) => {
+      if (name === 'open') {
+        lib.folderStack.push({ id: d.id, name: d.name });
+        reload();
+      } else if (name === 'preview') {
+        openItemPreview(d, lib);
+      } else if (name === 'quiz') {
+        startQuizByRef(d.quiz && d.quiz !== '1' ? d.quiz : null, d, lib);
+      }
+    };
+    $$('[data-act]', card).forEach(btn => btn.addEventListener('click', () => act(btn.getAttribute('data-act'))));
+    if (d.kind === 'folder') {
+      const h4 = $('h4', card);
+      h4.style.cursor = 'pointer';
+      h4.addEventListener('click', () => act('open'));
+    }
+  }
+
+  /* پیش‌نمایش/جزئیات آیتم در مودال */
+  function openItemPreview(d, lib) {
+    const isDemoMode = isDemo();
+    const canPreview = !!d.preview && !isDemoMode;
+    openModal({
+      title: 'جزئیات فایل',
+      size: 'lg',
+      bodyHTML:
+        '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:14px"><div class="file-icon" style="width:56px;height:56px;font-size:13px">' + esc((d.mime || '').indexOf('pdf') !== -1 ? 'PDF' : 'FILE') + '</div>'
+        + '<div style="min-width:0"><h4 style="margin:0 0 4px;word-break:break-word">' + esc(d.name) + '</h4><div class="hint">' + esc(d.size || 'فایل آموزشی') + (d.modified ? ' • آخرین تغییر: ' + fmtDate(d.modified) : '') + '</div></div></div>'
+        + (canPreview
+            ? '<iframe src="' + esc(d.preview) + '" title="پیش‌نمایش فایل" style="width:100%;height:380px;border:1px solid var(--line);border-radius:12px;background:#fff" loading="lazy"></iframe>'
+            : '<div class="empty" style="padding:26px"><span class="empty-ic">📄</span><h4>' + (isDemoMode ? 'پیش‌نمایش در حالت نمونه فعال نیست' : 'پیش‌نمایش مستقیم پشتیبانی نمی‌شود') + '</h4><p class="hint" style="margin:6px 0 0">برای مشاهده فایل از دکمه «باز کردن در Google Drive» استفاده کنید.</p></div>')
+        + '<p class="hint" id="markState" style="margin-top:12px"></p>',
+      footHTML:
+        (d.url ? '<button class="btn btn-soft" id="openDriveBtn">↗ باز کردن در Google Drive</button>' : '')
+        + '<button class="btn btn-soft" id="markDoneBtn">✓ ثبت به‌عنوان تکمیل‌شده</button>'
+        + (d.quiz ? '<button class="btn btn-primary" id="itemQuizBtn">شروع آزمون</button>' : ''),
+      onMount: (body, foot) => {
+        const openBtn = $('#openDriveBtn', foot);
+        if (openBtn) openBtn.addEventListener('click', () => window.open(d.url, '_blank', 'noopener'));
+        const markBtn = $('#markDoneBtn', foot);
+        markBtn.addEventListener('click', () => {
+          markBtn.disabled = true;
+          callServer('markDriveItemComplete', lib ? lib.teamKey : '', d.id).then(() => {
+            const s = $('#markState', body); if (s) s.textContent = '✓ برای شما به‌عنوان تکمیل‌شده ثبت شد.';
+            state.bootstrap = null;
+            toast('پیشرفت شما ثبت شد');
+            if (lib && lib._reload) lib._reload();
+          }).catch(err => { markBtn.disabled = false; toast(err.message, 'error'); });
+        });
+        const quizBtn = $('#itemQuizBtn', foot);
+        if (quizBtn) quizBtn.addEventListener('click', () => { closeModal(); startQuizByRef(d.quiz, d, lib); });
+      }
+    });
+  }
+
+  /* شروع آزمون از روی آیتم کتابخانه */
+  function startQuizByRef(quizId, d, lib) {
+    if (quizId) { startQuiz(quizId, { contextLabel: d.name, onDone: lib && lib._reload }); return; }
+    toast('آزمون این آیتم پیدا نشد.', 'error');
+  }
+
+  /* ════════════════════════════════════════
+     کتابخانه (نمای مستقل)
+     ════════════════════════════════════════ */
+  VIEWS.library = async () => {
+    const b = state.bootstrap || await callServer('getBootstrap');
+    paintChromeIfNeeded(b);
+    if (!(state.teams || []).length) { $('#view').innerHTML = emptyHTML('🏢', 'تیمی در دسترس نیست', 'برای حساب شما تیمی تعریف نشده است.'); return; }
+    const q = state.params.q || '';
+    $('#view').innerHTML = '<div class="section-head"><h3>کتابخانه محتوای آموزشی</h3><small>دریافت مستقیم از Google Drive — صفحه‌ای و بدون بارگذاری کل فایل‌ها</small></div><div id="libraryRoot"></div>';
+    const lib = renderLibraryBrowser($('#libraryRoot'), { teamKey: state.params.teamKey || state.teams[0].key });
+    if (q) { const s = $('#libSearch'); if (s) { s.value = q; lib.search = q; lib._reload(); } }
+  };
+
+  /* ════════════════════════════════════════
+     مسیر یادگیری
+     ════════════════════════════════════════ */
+  VIEWS.path = async (params) => {
+    const pathId = params.pathId;
+    const b = state.bootstrap || await callServer('getBootstrap');
+    paintChromeIfNeeded(b);
+    const resp = await callServer('getPath', pathId);
+    const p = resp.path, items = resp.items || [];
+
+    let html = '<section class="path-header">'
+      + '<button class="icon-btn" id="backToTeams" aria-label="بازگشت">→</button>'
+      + '<div class="path-header-main"><h2>' + esc(p.title) + '</h2><p>' + esc(p.description || '') + '</p>'
+      + '<div class="pstep-meta" style="margin-top:8px;color:var(--muted);font-size:11px;display:flex;gap:12px"><span>تیم ' + esc(p.teamName) + '</span><span>' + fmtNum(p.total) + ' مرحله</span></div></div>'
+      + '<div class="progress-big" style="min-width:190px"><div style="flex:1">' + progressHTML(p.percent) + '<div class="hint" style="margin-top:4px">' + fmtNum(p.done) + ' از ' + fmtNum(p.total) + ' مرحله تکمیل شده</div></div><span class="pb-num">' + fmtNum(p.percent) + '٪</span></div>'
+      + '</section>';
+
+    if (!items.length) {
+      html += emptyHTML('📭', 'این مسیر هنوز محتوایی ندارد', 'مدیر محتوا هنوز آیتمی اضافه نکرده است.');
+    } else {
+      html += '<div class="path-steps">' + items.map((item, i) => {
+        const done = item.status === 'completed';
+        const locked = item.status === 'locked';
+        const quizPending = item.status === 'quiz_pending';
+        const idx = done ? '✓' : (locked ? '🔒' : fmtNum(item.order || i + 1));
+        const typeLabel = item.itemType === 'video' ? 'ویدئو' : item.itemType === 'link' ? 'پیوند' : 'فایل Drive';
+        let action = '';
+        if (done) action = '<span class="tag tag-ok">تکمیل‌شده ✓</span>';
+        else if (locked) action = '<span class="tag tag-muted">قفل</span>';
+        else if (quizPending) action = '<button class="btn btn-soft btn-sm" data-view-item="' + esc(item.driveItemId || '') + '" data-item-id="' + esc(item.itemId) + '" data-item-title="' + esc(item.title) + '">مرور محتوا</button><button class="btn btn-primary btn-sm" data-quiz-id="' + esc(item.quizId) + '" data-item-title="' + esc(item.title) + '">شروع آزمون</button>';
+        else action = '<button class="btn btn-navy btn-sm" data-view-item="' + esc(item.driveItemId || '') + '" data-item-id="' + esc(item.itemId) + '" data-item-title="' + esc(item.title) + '">مرور محتوا</button>';
+        return '<div class="pstep ' + esc(item.status) + '">'
+          + '<div class="pstep-index">' + idx + '</div>'
+          + '<div class="pstep-body"><h4>' + esc(item.title) + '</h4>'
+          + '<div class="pstep-meta"><span>' + typeLabel + '</span>'
+          + (item.estimatedMin ? '<span>' + svgIcon(ICONS.clock, 'svg-inline') + ' حدود ' + fmtNum(item.estimatedMin) + ' دقیقه</span>' : '')
+          + (item.required ? '<span class="tag tag-req">اجباری</span>' : '<span class="tag tag-opt">اختیاری</span>')
+          + (item.quiz ? '<span class="tag tag-info">آزمون متصل</span>' : '')
+          + (done && item.completedAt ? '<span>تکمیل: ' + fmtDate(item.completedAt) + '</span>' : '')
+          + '</div></div>'
+          + '<div class="pstep-actions">' + action + '</div>'
+          + '</div>';
+      }).join('') + '</div>';
+    }
+
+    $('#view').innerHTML = html;
+    $('#backToTeams').addEventListener('click', () => go('teams'));
+    $$('#view [data-quiz-id]').forEach(btn => btn.addEventListener('click', () => startQuiz(btn.getAttribute('data-quiz-id'), { contextLabel: btn.getAttribute('data-item-title'), onDone: () => go('path', params) })));
+    $$('#view [data-view-item]').forEach(btn => btn.addEventListener('click', () => {
+      openPathItemModal({ driveItemId: btn.getAttribute('data-view-item'), itemId: btn.getAttribute('data-item-id'), title: btn.getAttribute('data-item-title') }, params);
+    }));
+  };
+
+  function openPathItemModal(item, params) {
+    const driveUrl = item.driveItemId ? 'https://drive.google.com/open?id=' + item.driveItemId : '';
+    const previewUrl = item.driveItemId ? 'https://drive.google.com/file/d/' + item.driveItemId + '/preview' : '';
+    openModal({
+      title: esc(item.title),
+      size: 'lg',
+      bodyHTML:
+        (previewUrl && !isDemo()
+          ? '<iframe src="' + esc(previewUrl) + '" title="پیش‌نمایش" style="width:100%;height:400px;border:1px solid var(--line);border-radius:12px;background:#fff" loading="lazy"></iframe>'
+          : '<div class="empty" style="padding:30px"><span class="empty-ic">📄</span><h4>' + (isDemo() ? 'محتوای نمونه — پیش‌نمایش در نسخه واقعی از Drive نمایش داده می‌شود' : 'این محتوا پیش‌نمایش مستقیم ندارد') + '</h4></div>')
+        + '<p class="hint" style="margin-top:10px">پس از مطالعه محتوا، دکمه «تکمیل و ثبت» را بزنید.</p>',
+      footHTML:
+        (driveUrl ? '<button class="btn btn-soft" id="openDrive2">↗ باز کردن در Drive</button>' : '')
+        + '<button class="btn btn-primary" id="completeItemBtn">✓ تکمیل و ثبت</button>',
+      onMount: (body, foot) => {
+        const ob = $('#openDrive2', foot);
+        if (ob) ob.addEventListener('click', () => window.open(driveUrl, '_blank', 'noopener'));
+        $('#completeItemBtn', foot).addEventListener('click', () => {
+          const btn = $('#completeItemBtn', foot);
+          btn.disabled = true;
+          callServer('markItemComplete', item.itemId).then(() => {
+            closeModal();
+            state.bootstrap = null;
+            toast('این مرحله برای شما تکمیل شد ✓');
+            go('path', params);
+          }).catch(err => { btn.disabled = false; toast(err.message, 'error'); });
+        });
+      }
+    });
+  }
+
+  /* ════════════════════════════════════════
+     کارنامه (تریبتی)
+     ════════════════════════════════════════ */
+  VIEWS.transcript = async () => {
+    const b = state.bootstrap || await callServer('getBootstrap');
+    paintChromeIfNeeded(b);
+    const resp = await callServer('getMyTranscript');
+    const s = resp.summary || {};
+    const attempts = resp.attempts || [];
+
+    let html = '<div class="stats">'
+      + statCard('accent', '▣', 'کل تلاش‌ها', fmtNum(s.totalAttempts), 'در همه آزمون‌ها')
+      + statCard('ok', '✓', 'آزمون‌های گذرانده', fmtNum(s.passedQuizzes) + ' <small style="font-size:12px;color:var(--muted)">/ ' + fmtNum(s.uniqueQuizzes) + '</small>', 'از آزمون‌های منحصربه‌فرد')
+      + statCard('gold', '★', 'میانگین نمره', fmtNum(s.avgScore) + '٪', 'در همه تلاش‌ها')
+      + statCard('warn', '✎', 'در انتظار بازبینی', fmtNum(attempts.filter(a => a.status === 'pending_review').length), 'سوالات تشریحی توسط منتور بررسی می‌شود')
+      + '</div>';
+
+    html += '<div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>تاریخچه آزمون‌ها</h3><small>' + fmtNum(attempts.length) + ' تلاش ثبت‌شده</small></div>';
+    if (!attempts.length) {
+      html += emptyHTML('📝', 'هنوز در آزمونی شرکت نکرده‌اید', 'آزمون‌ها از داخل مسیر یادگیری یا کتابخانه در دسترس‌اند.');
+    } else {
+      html += '<div class="table-wrap"><table class="data"><thead><tr><th>آزمون</th><th>تاریخ</th><th>نمره</th><th>وضعیت</th><th>نتیجه</th><th>بازخورد</th></tr></thead><tbody>'
+        + attempts.map(a => {
+          const st = a.status === 'pending_review' ? '<span class="tag tag-warn" style="background:var(--warn-soft);color:var(--warn)">در انتظار بازبینی</span>' : a.status === 'reviewed' ? '<span class="tag tag-info">بازبینی‌شده</span>' : '<span class="tag tag-muted">خودکار</span>';
+          const res = a.passed ? '<span class="tag tag-ok">قبول</span>' : '<span class="tag tag-danger">رد</span>';
+          return '<tr><td>' + esc(a.quizTitle) + '</td><td>' + fmtDateTime(a.timestamp) + '</td><td><strong>' + fmtNum(a.score) + '٪</strong></td><td>' + st + '</td><td>' + res + '</td><td class="hint">' + esc(a.feedback || '—') + '</td></tr>';
+        }).join('')
+        + '</tbody></table></div>';
+    }
+    html += '</div>';
+    $('#view').innerHTML = html;
+  };
+
+  /* ════════════════════════════════════════
+     موتور آزمون (سمت کاربر)
+     ════════════════════════════════════════ */
+  function startQuiz(quizId, opts) {
+    opts = opts || {};
+    openModal({ title: 'در حال آماده‌سازی آزمون…', size: 'lg', bodyHTML: loadingHTML('دریافت اطلاعات آزمون…') });
+    callServer('getQuizForAttempt', quizId).then(resp => {
+      state.quiz = {
+        quizId: quizId, contextLabel: opts.contextLabel || '', onDone: opts.onDone || null,
+        meta: resp.quiz, questions: resp.questions || [], answers: {}, current: 0,
+        attemptToken: resp.attemptToken || '', startedAt: Date.now(), remaining: (resp.quiz.timeLimitMin || 0) * 60
+      };
+      renderQuizStart();
+    }).catch(err => {
+      openModal({ title: 'آزمون', size: 'lg', bodyHTML: errorHTML(err.message), footHTML: '<button class="btn btn-soft" data-close>بستن</button>' });
+    });
+  }
+
+  function renderQuizStart() {
+    const s = state.quiz, q = s.meta;
+    const attemptsLeft = q.maxAttempts ? (q.maxAttempts - q.attemptsUsed) : Infinity;
+    openModal({
+      title: 'شروع آزمون',
+      size: 'lg',
+      bodyHTML:
+        '<div class="quiz-start"><div class="qs-icon">✎</div>'
+        + '<h3 style="margin:0 0 6px">' + esc(q.title) + '</h3>'
+        + (q.description ? '<p class="hint" style="max-width:440px;margin:0 auto">' + esc(q.description) + '</p>' : '')
+        + '<div class="quiz-meta"><span>' + fmtNum(s.questions.length) + ' سؤال</span><span>' + fmtNum(q.totalPoints) + ' نمره</span><span>حدنصاب قبولی: ' + fmtNum(q.passScore) + '٪</span>'
+        + (q.timeLimitMin ? '<span>زمان: ' + fmtNum(q.timeLimitMin) + ' دقیقه</span>' : '<span>بدون محدودیت زمانی</span>')
+        + (q.maxAttempts ? '<span>تلاش باقی‌مانده: ' + fmtNum(attemptsLeft) + ' از ' + fmtNum(q.maxAttempts) + '</span>' : '<span>تلاش نامحدود</span>')
+        + '</div>'
+        + '<p class="hint">زمان آزمون از لحظه دریافت این صفحه محاسبه می‌شود. امکان بازگشت به سؤالات قبلی وجود دارد.</p>'
+        + '</div>',
+      footHTML: '<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="beginQuizBtn">شروع آزمون ✎</button>',
+      onMount: (body, foot) => $('#beginQuizBtn', foot).addEventListener('click', beginQuiz)
+    });
+  }
+
+  function beginQuiz() {
+    const s = state.quiz;
+    s.answers = {};
+    s.current = 0;
+    if (s.meta.timeLimitMin) {
+      s.remaining = Math.max(0, Math.ceil(s.meta.timeLimitMin * 60 - (Date.now() - s.startedAt) / 1000));
+      if (!s.remaining) { autoSubmitQuiz(); return; }
+      const t = setInterval(() => {
+        s.remaining = Math.max(0, Math.ceil(s.meta.timeLimitMin * 60 - (Date.now() - s.startedAt) / 1000));
+        const el = $('#quizTimer');
+        if (el) {
+          el.textContent = fmtClock(s.remaining);
+          el.classList.toggle('danger', s.remaining <= 60);
+        }
+        if (s.remaining <= 0) { clearInterval(t); autoSubmitQuiz(); }
+      }, 1000);
+      state.timers.push(t);
+    }
+    renderRunner();
+  }
+  const fmtClock = sec => { sec = Math.max(0, sec | 0); const m = Math.floor(sec / 60), r = sec % 60; return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0'); };
+
+  function optionObjs(q) {
+    if (!q.options) return [];
+    if (q.options.length && typeof q.options[0] === 'object') return q.options;
+    return q.options.map((text, index) => ({ index, text }));
+  }
+
+  function renderRunner() {
+    const s = state.quiz, i = s.current, q = s.questions[i];
+    const answeredCount = s.questions.filter(x => isAnswered(x)).length;
+
+    let html = '<div class="q-progress"><div class="q-progress-fill" style="width:' + Math.round(((i + 1) / s.questions.length) * 100) + '%"></div></div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+      + '<span class="hint">سؤال ' + fmtNum(i + 1) + ' از ' + fmtNum(s.questions.length) + ' — پاسخ‌داده‌شده: ' + fmtNum(answeredCount) + '</span>'
+      + (s.meta.timeLimitMin ? '<span class="quiz-timer" id="quizTimer">' + fmtClock(s.remaining) + '</span>' : '<span class="hint">بدون محدودیت زمانی</span>')
+      + '</div>'
+      + '<div class="question-block"><div class="q-head"><span>' + fmtNum(i + 1) + '. ' + esc(q.text) + '</span><span class="q-points">' + fmtNum(q.points) + ' نمره' + (q.type === 'essay' ? ' • تشریحی' : '') + '</span></div>'
+      + renderAnswerInput(q)
+      + '</div>'
+      + '<div class="q-palette">' + s.questions.map((x, j) => '<button class="q-dot' + (j === i ? ' current' : '') + (isAnswered(x) ? ' answered' : '') + '" data-goto="' + j + '">' + fmtNum(j + 1) + '</button>').join('') + '</div>';
+
+    openModal({
+      title: esc(s.meta.title),
+      size: 'lg',
+      bodyHTML: html,
+      footHTML: '<button class="btn btn-soft" id="prevQBtn" ' + (i === 0 ? 'disabled' : '') + '>→ قبلی</button>'
+        + (i < s.questions.length - 1
+            ? '<button class="btn btn-navy" id="nextQBtn">بعدی ←</button>'
+            : '<button class="btn btn-primary" id="submitQuizBtn">ثبت و ارسال آزمون ✓</button>'),
+      onMount: (body, foot) => {
+        bindAnswerInputs(body, q);
+        $$('[data-goto]', body).forEach(b => b.addEventListener('click', () => { persistCurrentQuestion(body); s.current = parseInt(b.getAttribute('data-goto'), 10); renderRunner(); }));
+        const prev = $('#prevQBtn', foot); if (prev) prev.addEventListener('click', () => { persistCurrentQuestion(body); s.current--; renderRunner(); });
+        const next = $('#nextQBtn', foot); if (next) next.addEventListener('click', () => { persistCurrentQuestion(body); s.current++; renderRunner(); });
+        const sub = $('#submitQuizBtn', foot); if (sub) sub.addEventListener('click', () => { persistCurrentQuestion(body); confirmSubmitQuiz(); });
+      }
+    });
+  }
+
+  function isAnswered(q) {
+    const v = state.quiz.answers[q.questionId];
+    if (q.type === 'multi') return Array.isArray(v) && v.length > 0;
+    if (q.type === 'essay') return String(v || '').trim().length > 0;
+    return v !== undefined && v !== null && v !== '';
+  }
+
+  function renderAnswerInput(q) {
+    if (q.type === 'essay') {
+      return '<textarea class="essay-box" id="essayInput" placeholder="پاسخ تشریحی خود را بنویسید…">' + esc(state.quiz.answers[q.questionId] || '') + '</textarea>'
+        + '<p class="hint" style="margin-top:6px">پاسخ تشریحی توسط منتور/مدیر بازبینی و نمره‌دهی می‌شود.</p>';
+    }
+    const opts = optionObjs(q);
+    const multi = q.type === 'multi';
+    const inputType = multi ? 'checkbox' : 'radio';
+    const chosen = state.quiz.answers[q.questionId];
+    return opts.map(o => {
+      const checked = multi ? (Array.isArray(chosen) && chosen.indexOf(o.index) !== -1) : chosen !== undefined && chosen !== null && Number(chosen) === o.index;
+      return '<label class="option' + (checked ? ' selected' : '') + '"><input type="' + inputType + '" name="ans" value="' + o.index + '"' + (checked ? ' checked' : '') + '>' + esc(o.text) + '</label>';
+    }).join('') + (multi ? '<p class="hint">می‌توانید چند گزینه را انتخاب کنید.</p>' : '');
+  }
+
+  function bindAnswerInputs(body, q) {
+    if (q.type === 'essay') { $('#essayInput', body).addEventListener('input', e => { state.quiz.answers[q.questionId] = e.target.value; }); return; }
+    $$('input[name="ans"]', body).forEach(input => {
+      input.addEventListener('change', () => {
+        if (q.type === 'multi') {
+          const vals = $$('input[name="ans"]:checked', body).map(x => Number(x.value));
+          state.quiz.answers[q.questionId] = vals;
+        } else {
+          state.quiz.answers[q.questionId] = Number(input.value);
+        }
+        $$('.option', body).forEach(l => l.classList.toggle('selected', l.querySelector('input').checked));
+      });
+    });
+  }
+
+  function persistCurrentQuestion(body) {
+    const q = state.quiz.questions[state.quiz.current];
+    if (q.type === 'essay') {
+      const t = $('#essayInput', body);
+      if (t) state.quiz.answers[q.questionId] = t.value;
+    }
+  }
+
+  function confirmSubmitQuiz() {
+    const s = state.quiz;
+    const unanswered = s.questions.filter(q => !isAnswered(q)).length;
+    openModal({
+      title: 'ثبت و ارسال آزمون', size: 'lg',
+      bodyHTML: unanswered ? '<strong>' + fmtNum(unanswered) + ' سؤال بی‌پاسخ مانده است.</strong><p>آزمون با پاسخ‌های فعلی ثبت می‌شود.</p>' : '<p>پس از ارسال، پاسخ‌ها قابل تغییر نیستند.</p>',
+      footHTML: '<button class="btn btn-soft" id="returnQuiz">بازگشت به آزمون</button><button class="btn btn-primary" id="sendQuiz">ارسال آزمون</button>',
+      onMount: (body, foot) => {
+        $('#returnQuiz', foot).addEventListener('click', renderRunner);
+        $('#sendQuiz', foot).addEventListener('click', () => { clearTimers(); submitQuizNow(); });
+      }
+    });
+  }
+
+  function autoSubmitQuiz() {
+    const body = $('#modalBody');
+    const q = state.quiz.questions[state.quiz.current];
+    if (q) persistCurrentQuestion(body || document);
+    submitQuizNow();
+  }
+
+  function submitQuizNow() {
+    const s = state.quiz;
+    if (!s) return;
+    const answers = s.questions.map(q => {
+      const v = s.answers[q.questionId];
+      return { questionId: q.questionId, value: v === undefined ? (q.type === 'multi' ? [] : q.type === 'essay' ? '' : -1) : v };
+    });
+    const timeSpent = Math.round((Date.now() - s.startedAt) / 1000);
+    openModal({ title: 'در حال ثبت و نمره‌دهی…', size: 'lg', bodyHTML: loadingHTML('ارسال پاسخ‌ها به سرور…') });
+    callServer('submitQuiz', s.quizId, answers, timeSpent, s.attemptToken).then(resp => {
+      clearTimers();
+      renderQuizResult(resp);
+    }).catch(err => {
+      openModal({ title: 'خطا در ثبت آزمون', size: 'lg', bodyHTML: errorHTML(err.message), footHTML: '<button class="btn btn-soft" data-close>بستن</button>' });
+    });
+  }
+
+  function renderQuizResult(r) {
+    const s = state.quiz;
+    const pass = r.passed;
+    const pending = r.status === 'pending_review';
+    const ring = scoreRing(r.score, pass ? 'var(--ok)' : pending ? 'var(--warn)' : 'var(--danger)');
+    let html = '<div class="result">' + ring
+      + '<h3>' + (pending ? 'پاسخ‌ها ثبت شد' : pass ? 'آفرین! قبول شدید 🎉' : 'این بار حدنصاب کسب نشد') + '</h3>'
+      + '<p>' + (pending ? 'سؤالات تشریحی شما در انتظار بازبینی منتور/مدیر است.' : 'نمره شما: <strong>' + fmtNum(r.score) + '٪</strong> — حدنصاب: ' + fmtNum(r.passScore) + '٪') + '</p>'
+      + '<div class="quiz-meta"><span>پاسخ صحیح: ' + fmtNum(r.correctCount) + '</span><span>پاسخ غلط: ' + fmtNum(r.wrongCount) + '</span>' + (pending ? '<span>در انتظار بازبینی: ' + fmtNum(r.pendingCount) + '</span>' : '') + '<span>تلاش: ' + fmtNum(r.attemptsUsed) + (r.maxAttempts ? ' از ' + fmtNum(r.maxAttempts) : '') + '</span></div>';
+    if (r.review) {
+      html += '<div style="text-align:right;margin-top:14px"><h4 style="font-size:13px;margin:0 0 6px">مرور پاسخ‌ها</h4>'
+        + r.review.map(rv => {
+          const q = s.questions.find(x => x.questionId === rv.questionId) || {};
+          const cls = rv.isCorrect === null ? 'pending' : rv.isCorrect ? 'right' : 'wrong';
+          const icon = rv.isCorrect === null ? '⏳' : rv.isCorrect ? '✓' : '✗';
+          const options = optionObjs(q);
+          const labels = ids => (Array.isArray(ids) ? ids : [ids]).map(id => { const o = options.find(x => Number(x.index) === Number(id)); return o ? o.text : ''; }).filter(Boolean).join('، ') || '—';
+          const answerDetail = rv.isCorrect === null ? '' : '<div class="hint">پاسخ شما: ' + esc(labels(rv.given)) + ' • پاسخ صحیح: ' + esc(labels(rv.correct)) + '</div>';
+          return '<div class="review-item ' + cls + '"><strong>' + icon + ' ' + esc(q.text || rv.questionId) + '</strong><div class="hint" style="margin-top:4px">' + (rv.isCorrect === null ? 'نیازمند بازبینی — ' + fmtNum(rv.points) + ' نمره' : (rv.isCorrect ? 'درست' : 'نادرست') + ' — امتیاز: ' + fmtNum(rv.awarded) + ' از ' + fmtNum(rv.points)) + '</div>' + answerDetail + '</div>';
+        }).join('')
+        + '</div>';
+    } else if (!pending) {
+      html += '<p class="hint" style="margin-top:10px">نمایش پاسخ‌های صحیح بر اساس تنظیمات این آزمون غیرفعال است.</p>';
+    }
+    html += '</div>';
+    const attemptsLeft = s.meta.maxAttempts ? s.meta.maxAttempts - r.attemptsUsed : Infinity;
+    const foot = (!pass && !pending && attemptsLeft > 0 ? '<button class="btn btn-navy" id="retryQuizBtn">تلاش مجدد (' + fmtNum(attemptsLeft) + ' تلاش باقی‌مانده)</button>' : '')
+      + '<button class="btn btn-primary" id="finishQuizBtn">بستن</button>';
+    openModal({
+      title: 'نتیجه آزمون', size: 'lg', bodyHTML: html, footHTML: foot,
+      onMount: (body, footEl) => {
+        $('#finishQuizBtn', footEl).addEventListener('click', () => { closeModal(); const cb = s.onDone; if (cb) { try { cb(); } catch (e) {} } refreshBadges(); });
+        const retry = $('#retryQuizBtn', footEl);
+        if (retry) retry.addEventListener('click', () => startQuiz(s.quizId, { contextLabel: s.contextLabel, onDone: s.onDone }));
+      }
+    });
+  }
+
+  function scoreRing(percent, color) {
+    const p = Math.max(0, Math.min(100, Number(percent) || 0));
+    const r = 52, c = 2 * Math.PI * r, off = c * (1 - p / 100);
+    return '<svg class="score-ring" width="130" height="130" viewBox="0 0 130 130" role="img" aria-label="نمره ' + p + ' درصد">'
+      + '<circle cx="65" cy="65" r="' + r + '" stroke="var(--panel-3)" stroke-width="12" fill="none"/>'
+      + '<circle cx="65" cy="65" r="' + r + '" stroke="' + color + '" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '" transform="rotate(-90 65 65)" style="transition:stroke-dashoffset 1s ease"/>'
+      + '<text x="65" y="61" text-anchor="middle" font-size="26" font-weight="800" fill="var(--text)">' + p + '٪</text>'
+      + '<text x="65" y="82" text-anchor="middle" font-size="10" fill="var(--muted)">نمره شما</text></svg>';
+  }
+
+  function refreshBadges() {
+    state.bootstrap = null;
+    // به‌روزرسانی نرم آمار داشبورد بدون رفرش کامل صفحه
+    if (state.view === 'dashboard') go('dashboard');
+  }
+
+  /* ════════════════════════════════════════
+     پنل مدیریت (پیاده‌سازی در Admin.html)
+     ════════════════════════════════════════ */
+  VIEWS.admin = async () => {
+    const b = state.bootstrap || await callServer('getBootstrap');
+    paintChromeIfNeeded(b);
+    if (state.user.role === 'learner') { $('#view').innerHTML = errorHTML('شما مجوز دسترسی به پنل مدیریت را ندارید.'); return; }
+    if (window.Admin && window.Admin.render) return window.Admin.render($('#view'), window.__app);
+    $('#view').innerHTML = errorHTML('ماژول مدیریت بارگذاری نشد.');
+  };
+
+  /* ───────── اعلانات (مدال زنگوله) ───────── */
+  function openAnnouncementsModal() {
+    openModal({ title: 'اعلانات', bodyHTML: loadingHTML('در حال دریافت اعلانات…') });
+    callServer('listAnnouncements').then(resp => {
+      const ann = resp.announcements || [];
+      $('#modalBody').innerHTML = ann.length
+        ? '<div style="display:grid;gap:10px">' + ann.map(a => '<div class="ann-item"><div class="ann-ic">🔔</div><div style="min-width:0"><h5>' + esc(a.title) + '</h5><p>' + esc(a.body) + '</p><time>' + fmtDateTime(a.createdAt) + '</time></div></div>').join('') + '</div>'
+        : emptyHTML('🔔', 'اعلانی وجود ندارد', 'اعلان‌های آکادمی اینجا نمایش داده می‌شود.');
+    }).catch(err => { $('#modalBody').innerHTML = errorHTML(err.message); });
+  }
+
+  /* ───────── تم روشن/تاریک ───────── */
+  function applyTheme(theme) {
+    state.theme = theme;
+    document.body.setAttribute('data-theme', theme);
+    const dark = theme === 'dark';
+    $('#themeIcon').textContent = dark ? '☀' : '☾';
+    $('#themeLabel').textContent = dark ? 'تغییر به حالت روشن' : 'تغییر به حالت تاریک';
+    try { localStorage.setItem('bba-theme', theme); } catch (e) {}
+  }
+  function toggleTheme() { applyTheme(state.theme === 'dark' ? 'light' : 'dark'); }
+
+  /* ───────── راه‌اندازی ───────── */
+  function bindChrome() {
+    $('#menuBtn').addEventListener('click', openSidebar);
+    $('#scrim').addEventListener('click', closeSidebar);
+    $('#modalClose').addEventListener('click', closeModal);
+    overlay().addEventListener('click', e => { if (e.target === overlay()) closeModal(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeModal();
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(tag)) { e.preventDefault(); $('#globalSearch').focus(); }
+    });
+    document.addEventListener('click', e => { const c = e.target.closest('[data-close]'); if (c) closeModal(); });
+    $('#globalSearch').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); const q = e.target.value.trim(); go('library', q ? { q: q } : {}); }
+    });
+    $('#bellBtn').addEventListener('click', openAnnouncementsModal);
+    $('#themeToggle').addEventListener('click', toggleTheme);
+    $('#sideUser').addEventListener('click', () => go('transcript'));
+    $('#sideUser').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go('transcript'); } });
+
+    // حالت پیش‌نمایش: دکمه بازنشانی داده نمونه
+    if (isDemo()) {
+      const banner = $('#demoBanner');
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-soft btn-sm';
+      btn.style.marginInlineStart = 'auto';
+      btn.textContent = '↺ بازنشانی داده نمونه';
+      btn.addEventListener('click', () => {
+        if (window.DemoAPI && DemoAPI.reset) { DemoAPI.reset(); toast('داده نمونه بازنشانی شد'); setTimeout(() => location.reload(), 700); }
+      });
+      banner.appendChild(btn);
+    }
+  }
+
+  async function boot() {
+    // تم: انتخاب ذخیره‌شده → ترجیح سیستم → روشن
+    let saved = null;
+    try { saved = localStorage.getItem('bba-theme'); } catch (e) {}
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyTheme(saved || (prefersDark ? 'dark' : 'light'));
+
+    // لوگو و فاوآیکون
+    if (typeof BRAND !== 'undefined') {
+      $('#brandMark').innerHTML = '<img src="' + BRAND.mark + '" alt="لوگوی بیمه‌بازار">';
+      let link = document.querySelector('link[rel="icon"]');
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      link.type = 'image/png'; link.href = BRAND.favicon;
+    }
+
+    bindChrome();
+
+    // دریافت داده اولیه
+    try {
+      $('#view').innerHTML = loadingHTML('در حال اتصال به سرور…');
+      const b = await callServer('getBootstrap');
+      state.bootstrap = b;
+      state.teams = b.teams || [];
+      state.pageSize = b.pageSize || 12;
+      await paintChrome(b);
+      go('dashboard');
+    } catch (err) {
+      $('#topTitle').textContent = 'خطا در بارگذاری';
+      $('#view').innerHTML = errorHTML(err.message, true);
+      const rb = $('#retryBtn'); if (rb) rb.addEventListener('click', () => boot());
+    }
+  }
+
+  // رابط عمومی برای Admin.html و رویدادهای درون‌خطی
+  window.__app = {
+    state, callServer, go, VIEWS,
+    openModal, closeModal, confirmModal, toast,
+    esc, fmtDate, fmtDateTime, fmtNum,
+    progressHTML, loadingHTML, errorHTML, emptyHTML, statCard,
+    isDemo, refreshBadges, startQuiz
+  };
+  window.App = { go: function () { return go.apply(null, arguments); } };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+
+  return { go: go };
+})();
+</script>

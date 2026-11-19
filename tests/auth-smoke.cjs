@@ -1,0 +1,6 @@
+const vm=require('node:vm'), fs=require('node:fs'), assert=require('node:assert/strict');
+let email='admin@example.com', rows=[{Email:'admin@example.com',Name:'Admin',Role:'admin',Teams:'account',Active:true},{Email:'u@example.com',Role:'learner',Teams:'account',Active:true}];
+const c={Session:{getActiveUser:()=>({getEmail:()=>email})},CONFIG:{DEMO_MODE:false},TEAM_CONFIG:[{key:'account'}],ROLE_LABELS:{admin:'admin',learner:'learner'},rows_:()=>rows,truthy_:v=>v===true,splitCsv_:s=>String(s||'').split(',').filter(Boolean)};
+vm.createContext(c);vm.runInContext(fs.readFileSync('Auth.gs','utf8'),c);
+assert.equal(c.getUserContext().role,'admin');email='u@example.com';assert.equal(c.getUserContext().role,'learner');rows[1].Active=false;assert.throws(()=>c.getUserContext(),/غیرفعال/);email='';assert.throws(()=>c.getUserContext(),/هویت/);email='outsider@example.com';assert.throws(()=>c.getUserContext(),/دسترسی/);email='admin@example.com';c.rows_=()=>{throw Error('storage down')};assert.throws(()=>c.getUserContext(),/storage down/);
+console.log('Auth fail-closed smoke checks passed (mocked GAS).');

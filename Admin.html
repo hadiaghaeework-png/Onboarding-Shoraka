@@ -1,0 +1,265 @@
+<script>
+/* ════════════════════════════════════════════════════════════
+   پنل مدیریت — BimeBazar Learning Academy
+   تب‌ها بر اساس نقش: admin / team_manager / mentor
+   ════════════════════════════════════════════════════════════ */
+window.Admin = (() => {
+  'use strict';
+
+  function render(container, A) {
+    const u = A.state.user;
+    const canManage = u.role === 'admin' || (u.role === 'team_manager' && u.canManage);
+    const tabs = [];
+    if (u.role === 'admin' || u.role === 'team_manager') {
+      tabs.push({ key: 'reports', label: 'گزارش عملکرد' });
+      tabs.push({ key: 'incomplete', label: 'تکمیل‌نشده‌ها' });
+    }
+
+    if (u.role === 'admin') { tabs.push({ key: 'users', label: 'کاربران' }); tabs.push({ key: 'content', label: 'مسیرهای آموزشی' }); tabs.push({ key: 'quizzes', label: 'آزمون‌ها' }); tabs.push({ key: 'review', label: 'بازبینی آزمون' }); }
+
+
+
+
+    if (!tabs.length) { container.innerHTML = A.emptyHTML('⚠', 'پنل منتور هنوز تکمیل نشده است', 'این قابلیت برای استفاده عملیاتی آماده نیست.'); return; }
+    const activeTab = (render._tab && tabs.some(t => t.key === render._tab)) ? render._tab : tabs[0].key;
+
+    container.innerHTML =
+      '<div class="section-head"><h3>پنل مدیریت</h3><small>نقش شما: ' + esc2(A, u.roleLabel || u.role) + ' — تمام عملیات سرور-ساید بررسی مجوز می‌شوند</small></div>'
+      + '<div class="tabs" id="adminTabs" role="tablist">' + tabs.map(t => '<button class="tab' + (t.key === activeTab ? ' active' : '') + '" data-tab="' + t.key + '">' + esc2(A, t.label) + '</button>').join('') + '</div>'
+      + '<div id="adminBody"></div>';
+
+    const body = container.querySelector('#adminBody');
+    const activate = (key) => {
+      render._tab = key;
+      container.querySelectorAll('#adminTabs .tab').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === key));
+      body.innerHTML = A.loadingHTML('در حال بارگذاری…');
+      Promise.resolve(TAB_RENDERERS[key](body, A)).catch(err => {
+        body.innerHTML = A.errorHTML(err.message, true);
+        const rb = body.querySelector('#retryBtn'); if (rb) rb.addEventListener('click', () => activate(key));
+      });
+    };
+    container.querySelectorAll('#adminTabs .tab').forEach(b => b.addEventListener('click', () => activate(b.getAttribute('data-tab'))));
+    activate(activeTab);
+  }
+  const esc2 = (A, s) => A.esc(s);
+
+  function splitTeams(s) { return (Array.isArray(s) ? s : String(s || '').split(',')).map(x => String(x).trim()).filter(Boolean); }
+
+  /* ══════════ خروجی CSV با fallback ══════════ */
+  function downloadCsv(A, resp) {
+    try {
+      const bin = atob(resp.csvBase64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = resp.filename || 'report.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      A.toast('فایل خروجی دانلود شد');
+    } catch (e) {
+      const text = decodeURIComponent(escape(atob(resp.csvBase64)));
+      A.openModal({
+        title: 'خروجی CSV (کپی دستی)',
+        bodyHTML: '<p class="hint">دانلود خودکار در این محیط ممکن نشد؛ متن زیر را کپی کنید و در اکسل باز کنید:</p><textarea class="essay-box" style="min-height:220px;direction:ltr;text-align:left" readonly>' + A.esc(text) + '</textarea>',
+        footHTML: '<button class="btn btn-primary" data-close>بستن</button>'
+      });
+    }
+  }
+
+  /* ══════════ تب: گزارش عملکرد ══════════ */
+  function renderReports(body, A) {
+    return A.callServer('reportSummary', '').then(resp => {
+      const teams = resp.teams || [], totals = resp.totals || {};
+      let html = '<div class="stats" style="margin-bottom:16px">'
+        + A.statCard('accent', '👥', 'اعضای فعال', A.fmtNum(totals.members), 'در تیم‌های مجاز شما')
+        + A.statCard('gold', '▣', 'تلاش‌های آزمون', A.fmtNum(totals.attempts), 'مجموع تلاش‌ها')
+        + A.statCard('ok', '★', 'میانگین نمره', A.fmtNum(totals.avgScore) + '٪', 'در همه تیم‌ها')
+        + A.statCard('warn', '✎', 'در انتظار بازبینی', A.fmtNum(totals.pendingReview), 'نیازمند اقدام منتور/مدیر')
+        + '</div>';
+
+      html += '<div class="grid-2"><div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>میانگین پیشرفت تیم‌ها (%)</h3></div>'
+        + teams.map(t => '<div class="bar-row"><span>تیم ' + A.esc(t.name) + '</span><div class="bar-track"><div class="bar-fill" style="width:' + t.avgCompletion + '%">' + A.fmtNum(t.avgCompletion) + '٪</div></div><span>' + A.fmtNum(t.members) + ' عضو</span></div>').join('')
+        + '</div><div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>میانگین نمره آزمون (%)</h3></div>'
+        + teams.map(t => '<div class="bar-row"><span>تیم ' + A.esc(t.name) + '</span><div class="bar-track"><div class="bar-fill" style="width:' + t.avgScore + '%">' + A.fmtNum(t.avgScore) + '٪</div></div><span>' + A.fmtNum(t.attempts) + ' تلاش</span></div>').join('')
+        + '</div></div>';
+
+      html += '<div class="panel" style="margin-top:16px"><div class="section-head" style="margin:0 0 12px"><h3>خلاصه تیم‌ها</h3>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-soft btn-sm" id="csvSummary">⬇ خروجی Excel (خلاصه تیم‌ها)</button><button class="btn btn-soft btn-sm" id="csvProgress">⬇ خروجی Excel (پیشرفت اعضا)</button></div>'
+        + '</div><div class="table-wrap"><table class="data"><thead><tr><th>تیم</th><th>اعضا</th><th>میانگین تکمیل</th><th>تکمیل‌شده کامل</th><th>تلاش آزمون</th><th>میانگین نمره</th><th>قبول</th><th>بازبینی</th></tr></thead><tbody>'
+        + teams.map(t => '<tr style="cursor:pointer" data-drilldown="' + A.esc(t.key) + '" title="مشاهده اعضا"><td><strong>تیم ' + A.esc(t.name) + '</strong></td><td>' + A.fmtNum(t.members) + '</td><td>' + A.fmtNum(t.avgCompletion) + '٪</td><td>' + A.fmtNum(t.completedMembers) + '</td><td>' + A.fmtNum(t.attempts) + '</td><td>' + A.fmtNum(t.avgScore) + '٪</td><td>' + A.fmtNum(t.passedAttempts) + '</td><td>' + A.fmtNum(t.pendingReview) + '</td></tr>').join('')
+        + '</tbody></table></div><div id="drilldown" style="margin-top:16px"></div></div>';
+
+      body.innerHTML = html;
+      body.querySelector('#csvSummary').addEventListener('click', () => A.callServer('reportExportCsv', 'team_summary', '').then(r => downloadCsv(A, r)).catch(e => A.toast(e.message, 'error')));
+      body.querySelector('#csvProgress').addEventListener('click', () => A.callServer('reportExportCsv', 'user_progress', '').then(r => downloadCsv(A, r)).catch(e => A.toast(e.message, 'error')));
+      body.querySelectorAll('[data-drilldown]').forEach(row => row.addEventListener('click', () => renderMembersDrilldown(body.querySelector('#drilldown'), A, row.getAttribute('data-drilldown'))));
+    });
+  }
+
+  function renderMembersDrilldown(mount, A, teamKey) {
+    mount.innerHTML = A.loadingHTML('دریافت وضعیت اعضا…');
+    A.callServer('reportTeamMembers', teamKey).then(resp => {
+      const members = resp.members || [];
+      mount.innerHTML = '<h4 style="margin:0 0 8px;font-size:13px">اعضای تیم — برای مشاهده کارنامه کامل و ثبت بازخورد، روی نام کلیک کنید</h4>'
+        + (members.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>نام</th><th>ایمیل</th><th>پیشرفت</th><th>تلاش‌ها</th><th>میانگین نمره</th><th>آخرین فعالیت</th></tr></thead><tbody>'
+          + members.map(m => '<tr style="cursor:pointer" data-member="' + A.esc(m.email) + '"><td><strong>' + A.esc(m.name) + '</strong></td><td class="hint">' + A.esc(m.email) + '</td><td><div class="progress-bar" style="min-width:120px"><div class="progress-fill" style="width:' + m.completion + '%"></div></div><span class="hint">' + A.fmtNum(m.completion) + '٪ (' + A.fmtNum(m.itemsDone) + '/' + A.fmtNum(m.itemsTotal) + ')</span></td><td>' + A.fmtNum(m.attempts) + '</td><td>' + A.fmtNum(m.avgScore) + '٪</td><td class="hint">' + A.fmtDateTime(m.lastActivity) + '</td></tr>').join('')
+          + '</tbody></table></div>' : A.emptyHTML('👥', 'عضوی در این تیم ثبت نشده است', ''));
+      mount.querySelectorAll('[data-member]').forEach(row => row.addEventListener('click', () => openMemberModal(A, row.getAttribute('data-member'))));
+    }).catch(err => { mount.innerHTML = A.errorHTML(err.message, true); });
+  }
+
+  /* ══════════ مودال کارنامه کامل یک نفر + بازخورد منتور ══════════ */
+  function openMemberModal(A, email) {
+    A.openModal({ title: 'کارنامه عضو', size: 'xl', bodyHTML: A.loadingHTML('دریافت کارنامه…') });
+    A.callServer('reportMember', email).then(resp => {
+      const m = resp.member, paths = resp.paths || [], attempts = resp.attempts || [], notes = resp.notes || [];
+      const u = A.state.user;
+      const isMentee = m.mentorEmail === u.email;
+      const canNote = u.role === 'admin' || u.role === 'team_manager' || isMentee;
+
+      let html = '<div style="display:flex;gap:14px;align-items:center;margin-bottom:14px"><div class="avatar" style="width:56px;height:56px;font-size:19px">' + A.esc((m.name || m.email).trim()[0] || '؟') + '</div><div><h4 style="margin:0">' + A.esc(m.name) + '</h4><div class="hint">' + A.esc(m.email) + ' • ' + A.esc((m.teams || []).join('، ')) + '</div></div></div>';
+
+      html += '<h4 style="font-size:13px;margin:14px 0 8px">پیشرفت در مسیرها</h4>';
+      html += paths.length ? paths.map(p => '<div class="pstep-meta" style="display:flex;justify-content:space-between;gap:10px;margin:6px 0"><span>' + A.esc(p.title) + '</span><span>' + A.fmtNum(p.percent) + '٪ (' + A.fmtNum(p.done) + '/' + A.fmtNum(p.total) + ')</span></div>' + A.progressHTML(p.percent)).join('') : '<p class="hint">مسیری برای این عضو تعریف نشده است.</p>';
+
+      html += '<h4 style="font-size:13px;margin:16px 0 8px">تلاش‌های آزمون (' + A.fmtNum(attempts.length) + ')</h4>';
+      html += attempts.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>آزمون</th><th>تاریخ</th><th>نمره</th><th>نتیجه</th></tr></thead><tbody>'
+        + attempts.map(a => '<tr><td>' + A.esc(a.quizTitle) + '</td><td>' + A.fmtDateTime(a.timestamp) + '</td><td><strong>' + A.fmtNum(a.score) + '٪</strong></td><td>' + (a.passed ? '<span class="tag tag-ok">قبول</span>' : '<span class="tag tag-danger">رد</span>') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="hint">تلاش آزمونی ثبت نشده است.</p>';
+
+      html += '<h4 style="font-size:13px;margin:16px 0 8px">بازخورد منتور (' + A.fmtNum(notes.length) + ')</h4>';
+      html += notes.length ? '<div style="display:grid;gap:8px">' + notes.map(n => '<div class="ann-item"><div class="ann-ic">🗒</div><div style="min-width:0"><p style="margin:0;color:var(--text);font-size:12px">' + A.esc(n.note) + '</p><time>' + A.fmtDateTime(n.timestamp) + ' — ' + A.esc(n.mentorEmail) + '</time></div></div>').join('') + '</div>' : '<p class="hint">هنوز بازخوردی ثبت نشده است.</p>';
+
+      if (canNote) {
+        html += '<form id="noteForm" style="margin-top:12px;display:flex;gap:8px"><input name="note" class="filter" style="flex:1" placeholder="بازخورد خود را بنویسید…" required><button class="btn btn-navy btn-sm" type="submit">ثبت بازخورد</button></form>';
+      }
+
+      const bodyEl = document.querySelector('#modalBody');
+      bodyEl.innerHTML = html;
+      const form = bodyEl.querySelector('#noteForm');
+      if (form) form.addEventListener('submit', e => {
+        e.preventDefault();
+        const input = form.querySelector('input[name="note"]');
+        const note = input.value.trim();
+        if (!note) return;
+        A.callServer('addMentorNote', email, note).then(() => { A.toast('بازخورد ثبت شد'); openMemberModal(A, email); }).catch(err => A.toast(err.message, 'error'));
+      });
+    }).catch(err => { document.querySelector('#modalBody').innerHTML = A.errorHTML(err.message); });
+  }
+
+  /* ══════════ تب: تکمیل‌نشده‌ها ══════════ */
+  function renderIncomplete(body, A) {
+    return A.callServer('reportIncomplete', '').then(resp => {
+      const rows = resp.rows || [];
+      body.innerHTML = '<div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>آموزش‌های تکمیل‌نشده</h3>'
+        + '<button class="btn btn-soft btn-sm" id="csvIncomplete">⬇ خروجی Excel</button></div>'
+        + (rows.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>تیم</th><th>نام</th><th>ایمیل</th><th>پیشرفت</th><th>مراحل مانده</th></tr></thead><tbody>'
+          + rows.map(r => '<tr><td>' + A.esc(r.teamName) + '</td><td><strong>' + A.esc(r.name) + '</strong></td><td class="hint">' + A.esc(r.email) + '</td><td>' + A.fmtNum(r.completion) + '٪</td><td>' + A.fmtNum(r.remaining) + ' مرحله</td></tr>').join('')
+          + '</tbody></table></div>' : A.emptyHTML('🎉', 'همه اعضا مسیرهای خود را کامل کرده‌اند', ''))
+        + '</div>';
+      body.querySelector('#csvIncomplete').addEventListener('click', () => A.callServer('reportExportCsv', 'incomplete', '').then(r => downloadCsv(A, r)).catch(e => A.toast(e.message, 'error')));
+    });
+  }
+
+  /* ══════════ تب: کاربران (ادمین) ══════════ */
+  function renderUsers(body, A) {
+    return A.callServer('adminListUsers').then(resp => {
+      const users = resp.users || [], teams = resp.teams || [];
+      const teamName = k => (teams.find(t => t.key === k) || {}).name || k;
+      const roleLabel = r => ({ admin: 'مدیر سامانه', team_manager: 'مدیر تیم', mentor: 'منتور', learner: 'کارشناس' }[r] || r);
+
+      body.innerHTML = '<div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>مدیریت کاربران <span class="tab-count">' + A.fmtNum(users.length) + '</span></h3>'
+        + '<div style="display:flex;gap:8px"><input class="filter" id="userSearch" placeholder="جست‌وجو در نام/ایمیل…"><button class="btn btn-primary btn-sm" id="addUserBtn">+ افزودن کاربر</button></div></div>'
+        + '<div class="table-wrap"><table class="data" id="usersTable"><thead><tr><th>نام</th><th>ایمیل</th><th>نقش</th><th>تیم‌ها</th><th>منتور</th><th>مدیریت محتوا</th><th>وضعیت</th><th></th></tr></thead><tbody>'
+        + users.map(u => '<tr data-email="' + A.esc(u.email) + '" data-search="' + A.esc((u.name + ' ' + u.email).toLowerCase()) + '"><td><strong>' + A.esc(u.name || '—') + '</strong></td><td class="hint">' + A.esc(u.email) + '</td><td>' + A.esc(roleLabel(u.role)) + '</td><td>' + A.esc(splitTeams(u.teams).map(teamName).join('، ')) + '</td><td class="hint">' + A.esc(u.mentorEmail || '—') + '</td><td>' + (u.canManage ? '✓' : '—') + '</td><td>' + (u.active ? '<span class="tag tag-ok">فعال</span>' : '<span class="tag tag-danger">غیرفعال</span>') + '</td><td style="white-space:nowrap"><button class="btn btn-soft btn-sm" data-edit>ویرایش</button> <button class="btn ' + (u.active ? 'btn-danger' : 'btn-ok') + ' btn-sm" data-toggle>' + (u.active ? 'غیرفعال' : 'فعال') + '</button></td></tr>').join('')
+        + '</tbody></table></div></div>';
+
+      const search = body.querySelector('#userSearch');
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        body.querySelectorAll('#usersTable tbody tr').forEach(tr => { tr.style.display = !q || tr.getAttribute('data-search').includes(q) ? '' : 'none'; });
+      });
+      body.querySelector('#addUserBtn').addEventListener('click', () => openUserModal(A, null, teams, () => renderUsers(body, A)));
+      body.querySelectorAll('[data-edit]').forEach(btn => btn.addEventListener('click', () => {
+        const email = btn.closest('tr').getAttribute('data-email');
+        openUserModal(A, users.find(u => u.email === email), teams, () => renderUsers(body, A));
+      }));
+      body.querySelectorAll('[data-toggle]').forEach(btn => btn.addEventListener('click', () => {
+        const email = btn.closest('tr').getAttribute('data-email');
+        const u = users.find(x => x.email === email);
+        A.confirmModal({ title: u.active ? 'غیرفعال‌سازی کاربر' : 'فعال‌سازی کاربر', message: (u.active ? 'کاربر «' + u.email + '» غیرفعال شود؟ امکان ورود و مشاهده محتوا را از دست می‌دهد.' : 'کاربر «' + u.email + '» دوباره فعال شود؟'), confirmLabel: u.active ? 'غیرفعال‌سازی' : 'فعال‌سازی', danger: u.active, onConfirm: () => {
+          A.callServer('adminSetUserActive', email, !u.active).then(() => { A.toast('وضعیت کاربر به‌روزرسانی شد'); renderUsers(body, A); }).catch(e => A.toast(e.message, 'error'));
+        } });
+      }));
+    });
+  }
+
+  function openUserModal(A, user, teams, onSaved) {
+    user = user || {};
+    const isEdit = !!user.email;
+    const teamChecks = teams.map(t => '<label class="check-row"><input type="checkbox" name="teams" value="' + A.esc(t.key) + '"' + (splitTeams(user.teams).includes(t.key) ? ' checked' : '') + '> تیم ' + A.esc(t.name) + '</label>').join('');
+    A.openModal({
+      title: isEdit ? 'ویرایش کاربر' : 'افزودن کاربر',
+      footHTML: '<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveUserBtn">ذخیره</button>',
+      bodyHTML: '<form id="userForm" class="form-grid">'
+        + '<div class="form-field full"><label>ایمیل سازمانی *</label><input name="email" type="email" required value="' + A.esc(user.email || '') + '" ' + (isEdit ? 'readonly' : '') + ' placeholder="name@bimebazar.com"></div>'
+        + '<div class="form-field full"><label>نام و نام خانوادگی</label><input name="name" value="' + A.esc(user.name || '') + '" placeholder="علی رضایی"></div>'
+        + '<div class="form-field"><label>نقش *</label><select name="role">'
+        + [['learner', 'کارشناس'], ['admin', 'مدیر سامانه']].map(o => '<option value="' + o[0] + '"' + (user.role === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
+        + '</select></div>'
+        + '<div class="form-field full"><label>تیم‌ها</label><div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 0">' + teamChecks + '</div></div>'
+        + '</form>',
+      onMount: (bodyEl, foot) => {
+        foot.querySelector('#saveUserBtn').addEventListener('click', () => {
+          const form = bodyEl.querySelector('#userForm');
+          if (!form.reportValidity()) return;
+          const fd = new FormData(form);
+          const payload = {
+            email: fd.get('email'), name: fd.get('name'), role: fd.get('role'),
+            teams: Array.from(form.querySelectorAll('input[name="teams"]:checked')).map(x => x.value),
+            mentorEmail: '', canManage: fd.get('role') === 'admin'
+          };
+          A.callServer('adminUpsertUser', payload).then(() => { A.closeModal(); A.toast('کاربر ذخیره شد'); onSaved(); }).catch(e => A.toast(e.message, 'error'));
+        });
+      }
+    });
+  }
+
+
+  function renderContent(body, A) {
+    return A.callServer('adminListPaths', '').then(data => {
+      const paths = data.paths || [], teams = data.teams || [], quizzes = data.quizzes || [];
+      body.innerHTML = '<div class="panel"><div class="section-head"><h3>مسیرهای آموزشی</h3><button class="btn btn-primary" id="newPath">+ مسیر جدید</button></div>'
+        + '<p class="hint">محتوا را با شناسه یا پیوند Drive از پوشه همان تیم به مراحل متصل کنید. مراحل اجباری پیش‌نیاز مراحل بعدی هستند.</p>'
+        + '<div class="table-wrap"><table class="data"><thead><tr><th>عنوان</th><th>تیم</th><th>مراحل</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>'
+        + paths.map((p,i) => '<tr><td>'+A.esc(p.title)+'</td><td>'+A.esc((teams.find(t=>t.key===p.teamKey)||{}).name||p.teamKey)+'</td><td>'+A.fmtNum(p.itemCount)+'</td><td>'+(p.active?'فعال':'غیرفعال')+'</td><td><button class="btn btn-soft btn-sm" data-path="'+i+'">مراحل</button> <button class="btn btn-soft btn-sm" data-edit-path="'+i+'">ویرایش</button></td></tr>').join('')
+        + '</tbody></table></div><div id="pathItems"></div></div>';
+      body.querySelector('#newPath').onclick = () => pathForm(null);
+      body.querySelectorAll('[data-edit-path]').forEach(b=>b.onclick=()=>pathForm(paths[+b.dataset.editPath]));
+      body.querySelectorAll('[data-path]').forEach(b=>b.onclick=()=>showItems(paths[+b.dataset.path]));
+      function pathForm(p) {
+        p = p || {};
+        A.openModal({title:p.pathId?'ویرایش مسیر':'مسیر جدید', bodyHTML:'<form id="pathForm" class="form-grid"><div class="form-field full"><label>عنوان</label><input name="title" required value="'+A.esc(p.title||'')+'"></div><div class="form-field"><label>تیم</label><select name="teamKey" '+(p.pathId?'disabled':'')+'>'+teams.map(t=>'<option value="'+A.esc(t.key)+'" '+(p.teamKey===t.key?'selected':'')+'>'+A.esc(t.name)+'</option>').join('')+'</select></div><div class="form-field"><label>ترتیب</label><input type="number" name="order" value="'+A.esc(p.order||0)+'"></div><div class="form-field full"><label>توضیحات</label><textarea name="description">'+A.esc(p.description||'')+'</textarea></div><label class="check-row"><input type="checkbox" name="active" '+(p.active!==false?'checked':'')+'> فعال</label></form>',footHTML:'<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="savePath">ذخیره</button>',onMount:(m,f)=>{f.querySelector('#savePath').onclick=()=>{const form=m.querySelector('form');if(!form.reportValidity())return;const d=new FormData(form);const payload={pathId:p.pathId||'',title:d.get('title'),teamKey:p.teamKey||d.get('teamKey'),order:+d.get('order'),description:d.get('description'),active:form.elements.active.checked};A.callServer('adminSavePath',payload).then(()=>{A.closeModal();A.toast('مسیر ذخیره شد');renderContent(body,A);}).catch(e=>A.toast(e.message,'error'));};}});
+      }
+      function showItems(p) {
+        const mount=body.querySelector('#pathItems'); mount.innerHTML=A.loadingHTML();
+        A.callServer('adminPathItems',p.pathId).then(r=>{
+          const items=r.items||[];
+          mount.innerHTML='<div class="section-head"><h3>مراحل '+A.esc(p.title)+'</h3><button class="btn btn-primary btn-sm" id="newItem">+ مرحله جدید</button></div><div class="table-wrap"><table class="data"><thead><tr><th>ترتیب</th><th>عنوان</th><th>نوع</th><th>آزمون</th><th>عملیات</th></tr></thead><tbody>'+items.map((x,i)=>'<tr><td>'+A.fmtNum(x.order)+'</td><td>'+A.esc(x.title)+'</td><td>'+(x.required?'اجباری':'اختیاری')+(x.active?'':' (غیرفعال)')+'</td><td>'+A.esc((quizzes.find(q=>q.quizId===x.quizId)||{}).title||'—')+'</td><td><button class="btn btn-soft btn-sm" data-edit-item="'+i+'">ویرایش</button> <button class="btn btn-danger btn-sm" data-delete-item="'+i+'">حذف</button></td></tr>').join('')+'</tbody></table></div>';
+          mount.querySelector('#newItem').onclick=()=>itemForm(null);
+          mount.querySelectorAll('[data-edit-item]').forEach(b=>b.onclick=()=>itemForm(items[+b.dataset.editItem]));
+          mount.querySelectorAll('[data-delete-item]').forEach(b=>b.onclick=()=>A.confirmModal({message:'این مرحله غیرفعال شود؟',danger:true,onConfirm:()=>A.callServer('adminDeletePathItem',items[+b.dataset.deleteItem].itemId).then(()=>showItems(p)).catch(e=>A.toast(e.message,'error'))}));
+        }).catch(e=>{mount.innerHTML=A.errorHTML(e.message)});
+        function itemForm(it) {
+          it=it||{};
+          A.openModal({title:it.itemId?'ویرایش مرحله':'مرحله جدید',bodyHTML:'<form class="form-grid"><div class="form-field full"><label>عنوان</label><input name="title" required value="'+A.esc(it.title||'')+'"></div><div class="form-field full"><label>شناسه یا پیوند فایل Drive</label><input name="driveItemId" required value="'+A.esc(it.driveItemId||'')+'"></div><div class="form-field"><label>ترتیب</label><input type="number" name="order" value="'+A.esc(it.order||1)+'"></div><div class="form-field"><label>زمان تقریبی (دقیقه)</label><input type="number" min="0" name="estimatedMin" value="'+A.esc(it.estimatedMin||0)+'"></div><div class="form-field full"><label>آزمون مرتبط</label><select name="quizId"><option value="">بدون آزمون</option>'+quizzes.map(q=>'<option value="'+A.esc(q.quizId)+'" '+(it.quizId===q.quizId?'selected':'')+'>'+A.esc(q.title)+'</option>').join('')+'</select></div><label class="check-row"><input type="checkbox" name="required" '+(it.required!==false?'checked':'')+'> اجباری</label><label class="check-row"><input type="checkbox" name="active" '+(it.active!==false?'checked':'')+'> فعال</label></form>',footHTML:'<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveItem">ذخیره</button>',onMount:(m,f)=>{f.querySelector('#saveItem').onclick=()=>{const form=m.querySelector('form');if(!form.reportValidity())return;const d=new FormData(form);const payload={itemId:it.itemId||'',pathId:p.pathId,title:d.get('title'),driveItemId:d.get('driveItemId'),order:+d.get('order'),estimatedMin:+d.get('estimatedMin'),quizId:d.get('quizId'),required:form.elements.required.checked,active:form.elements.active.checked};A.callServer('adminSavePathItem',payload).then(()=>{A.closeModal();A.toast('مرحله ذخیره شد');showItems(p)}).catch(e=>A.toast(e.message,'error'));};}});
+        }
+      }
+    });
+  }
+
+  const TAB_RENDERERS = { reports: renderReports, incomplete: renderIncomplete, users: renderUsers, content: renderContent, quizzes: window.AdminQuiz.render, review: window.AdminQuiz.review };
+  return { render: render };
+})();
+</script>
