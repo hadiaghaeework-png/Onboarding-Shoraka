@@ -170,8 +170,8 @@ window.Admin = (() => {
       const roleLabel = r => ({ admin: 'مدیر سامانه', team_manager: 'مدیر تیم', mentor: 'منتور', learner: 'کارشناس' }[r] || r);
 
       body.innerHTML = '<div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>مدیریت کاربران <span class="tab-count">' + A.fmtNum(users.length) + '</span></h3>'
-        + '<div style="display:flex;gap:8px"><input class="filter" id="userSearch" placeholder="جست‌وجو در نام/ایمیل…"><button class="btn btn-primary btn-sm" id="addUserBtn">+ افزودن کاربر</button></div></div>'
-        + '<div class="table-wrap"><table class="data" id="usersTable"><thead><tr><th>نام</th><th>ایمیل</th><th>نقش</th><th>تیم‌ها</th><th>منتور</th><th>مدیریت محتوا</th><th>وضعیت</th><th></th></tr></thead><tbody>'
+        + '<div style="display:flex;gap:8px"><input class="filter" id="userSearch" placeholder="جست‌وجو در نام/نام کاربری…"><button class="btn btn-primary btn-sm" id="addUserBtn">+ افزودن کاربر</button></div></div>'
+        + '<div class="table-wrap"><table class="data" id="usersTable"><thead><tr><th>نام</th><th>نام کاربری</th><th>نقش</th><th>تیم‌ها</th><th>منتور</th><th>مدیریت محتوا</th><th>وضعیت</th><th></th></tr></thead><tbody>'
         + users.map(u => '<tr data-email="' + A.esc(u.email) + '" data-search="' + A.esc((u.name + ' ' + u.email).toLowerCase()) + '"><td><strong>' + A.esc(u.name || '—') + '</strong></td><td class="hint">' + A.esc(u.email) + '</td><td>' + A.esc(roleLabel(u.role)) + '</td><td>' + A.esc(splitTeams(u.teams).map(teamName).join('، ')) + '</td><td class="hint">' + A.esc(u.mentorEmail || '—') + '</td><td>' + (u.canManage ? '✓' : '—') + '</td><td>' + (u.active ? '<span class="tag tag-ok">فعال</span>' : '<span class="tag tag-danger">غیرفعال</span>') + '</td><td style="white-space:nowrap"><button class="btn btn-soft btn-sm" data-edit>ویرایش</button> <button class="btn ' + (u.active ? 'btn-danger' : 'btn-ok') + ' btn-sm" data-toggle>' + (u.active ? 'غیرفعال' : 'فعال') + '</button></td></tr>').join('')
         + '</tbody></table></div></div>';
 
@@ -203,7 +203,8 @@ window.Admin = (() => {
       title: isEdit ? 'ویرایش کاربر' : 'افزودن کاربر',
       footHTML: '<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveUserBtn">ذخیره</button>',
       bodyHTML: '<form id="userForm" class="form-grid">'
-        + '<div class="form-field full"><label>ایمیل سازمانی *</label><input name="email" type="email" required value="' + A.esc(user.email || '') + '" ' + (isEdit ? 'readonly' : '') + ' placeholder="name@bimebazar.com"></div>'
+        + '<div class="form-field full"><label>نام کاربری *</label><input name="email" type="text" required value="' + A.esc(user.email || '') + '" ' + (isEdit ? 'readonly' : '') + ' placeholder="username"></div>'
+        + '<div class="form-field full"><label>رمز عبور '+(isEdit?'(برای حفظ رمز فعلی خالی بگذارید)':'*')+'</label><input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" '+(isEdit?'':'required')+'></div>'
         + '<div class="form-field full"><label>نام و نام خانوادگی</label><input name="name" value="' + A.esc(user.name || '') + '" placeholder="علی رضایی"></div>'
         + '<div class="form-field"><label>نقش *</label><select name="role">'
         + [['learner', 'کارشناس'], ['admin', 'مدیر سامانه']].map(o => '<option value="' + o[0] + '"' + (user.role === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
@@ -216,7 +217,7 @@ window.Admin = (() => {
           if (!form.reportValidity()) return;
           const fd = new FormData(form);
           const payload = {
-            email: fd.get('email'), name: fd.get('name'), role: fd.get('role'),
+            email: fd.get('email'), password: fd.get('password') || '', name: fd.get('name'), role: fd.get('role'),
             teams: Array.from(form.querySelectorAll('input[name="teams"]:checked')).map(x => x.value),
             mentorEmail: '', canManage: fd.get('role') === 'admin'
           };

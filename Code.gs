@@ -27,9 +27,30 @@ function setupAcademy() {
   lock.waitLock(30000);
   try {
     const result = setupAcademy_();
+    provisionInitialAdmin_();
     Logger.log('راه‌اندازی انجام شد. فایل داده: ' + result.spreadsheetUrl);
     return result;
   } finally { lock.releaseLock(); }
+}
+
+/** اولین مدیر از Script Properties به شکل یک‌باره ایجاد می‌شود؛ قابل فراخوانی توسط کاربر وب نیست. */
+function provisionInitialAdmin_() {
+  const props = PropertiesService.getScriptProperties();
+  const username = normalizeUsername_(props.getProperty('INITIAL_ADMIN_USERNAME'));
+  const password = props.getProperty('INITIAL_ADMIN_PASSWORD');
+  if (!username && !password) {
+    if (!rows_('Credentials').length) Logger.log('برای ساخت مدیر اولیه INITIAL_ADMIN_USERNAME و INITIAL_ADMIN_PASSWORD را در Script Properties تنظیم و setupAcademy را دوباره اجرا کنید.');
+    return;
+  }
+  if (!username || !password) throw new Error('هر دو مقدار INITIAL_ADMIN_USERNAME و INITIAL_ADMIN_PASSWORD الزامی است.');
+  savePassword_(username, password);
+  const users = sheet_('Users'), existing = rows_('Users').find(u => normalizeUsername_(u.Email) === username);
+  if (existing) {
+    users.getRange(existing.__row, 3).setValue('admin');
+    users.getRange(existing.__row, 6).setValue(true);
+    users.getRange(existing.__row, 7).setValue(true);
+  } else users.appendRow([username, 'مدیر سامانه', 'admin', TEAM_CONFIG.map(t=>t.key).join(','), '', true, true, nowIso_()]);
+  props.deleteProperty('INITIAL_ADMIN_USERNAME'); props.deleteProperty('INITIAL_ADMIN_PASSWORD');
 }
 
 /** ساخت ساختار شیت‌ها، بدون درج داده آزمایشی. */

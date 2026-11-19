@@ -506,12 +506,27 @@ table.data tr:hover td{background:var(--panel-2)}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }
+[hidden]{display:none!important}
+.login-screen{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg)}
+.login-card{width:min(100%,420px);background:var(--panel);border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow);padding:32px;display:grid;gap:10px}
+.login-brand img{width:48px;height:48px;object-fit:contain}.login-card h1{font-size:20px;margin:8px 0 0}.login-card p{color:var(--muted);margin:0 0 12px;font-size:13px}.login-card label{font-size:12px;font-weight:700}.login-card input{background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px;outline:none}.login-card input:focus{border-color:var(--primary)}.login-card button{margin-top:10px}.login-error{padding:10px;border-radius:10px;background:var(--danger-soft);color:var(--danger);font-size:12px}
 </style>
 
 </head>
 <body data-theme="light">
 
-<div class="app" id="appRoot">
+<section id="loginScreen" class="login-screen" aria-label="ورود به آکادمی">
+  <form id="loginForm" class="login-card">
+    <div id="loginBrand" class="login-brand"></div>
+    <h1>ورود به آکادمی یادگیری</h1>
+    <p>نام کاربری و رمز عبور خود را وارد کنید.</p>
+    <label for="loginUsername">نام کاربری</label><input id="loginUsername" name="username" autocomplete="username" required>
+    <label for="loginPassword">رمز عبور</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+    <div id="loginError" role="alert" class="login-error" hidden></div>
+    <button class="btn btn-primary" id="loginButton" type="submit">ورود</button>
+  </form>
+</section>
+<div class="app" id="appRoot" hidden>
 
   <!-- ══════════ سایدبار ══════════ -->
   <aside id="sidebar" aria-label="ناوبری اصلی">
@@ -538,6 +553,7 @@ table.data tr:hover td{background:var(--panel-2)}
         <span class="tt-icon" id="themeIcon">☾</span>
         <span id="themeLabel">تغییر به حالت تاریک</span>
       </button>
+      <button class="theme-toggle" id="logoutBtn" type="button">خروج از حساب</button>
       <div class="side-foot">BimeBazar Learning Academy<br><span>© ۱۴۰۵ بیمه‌بازار — استفاده داخلی</span></div>
     </div>
   </aside>
@@ -816,8 +832,8 @@ window.Admin = (() => {
       const roleLabel = r => ({ admin: 'مدیر سامانه', team_manager: 'مدیر تیم', mentor: 'منتور', learner: 'کارشناس' }[r] || r);
 
       body.innerHTML = '<div class="panel"><div class="section-head" style="margin:0 0 12px"><h3>مدیریت کاربران <span class="tab-count">' + A.fmtNum(users.length) + '</span></h3>'
-        + '<div style="display:flex;gap:8px"><input class="filter" id="userSearch" placeholder="جست‌وجو در نام/ایمیل…"><button class="btn btn-primary btn-sm" id="addUserBtn">+ افزودن کاربر</button></div></div>'
-        + '<div class="table-wrap"><table class="data" id="usersTable"><thead><tr><th>نام</th><th>ایمیل</th><th>نقش</th><th>تیم‌ها</th><th>منتور</th><th>مدیریت محتوا</th><th>وضعیت</th><th></th></tr></thead><tbody>'
+        + '<div style="display:flex;gap:8px"><input class="filter" id="userSearch" placeholder="جست‌وجو در نام/نام کاربری…"><button class="btn btn-primary btn-sm" id="addUserBtn">+ افزودن کاربر</button></div></div>'
+        + '<div class="table-wrap"><table class="data" id="usersTable"><thead><tr><th>نام</th><th>نام کاربری</th><th>نقش</th><th>تیم‌ها</th><th>منتور</th><th>مدیریت محتوا</th><th>وضعیت</th><th></th></tr></thead><tbody>'
         + users.map(u => '<tr data-email="' + A.esc(u.email) + '" data-search="' + A.esc((u.name + ' ' + u.email).toLowerCase()) + '"><td><strong>' + A.esc(u.name || '—') + '</strong></td><td class="hint">' + A.esc(u.email) + '</td><td>' + A.esc(roleLabel(u.role)) + '</td><td>' + A.esc(splitTeams(u.teams).map(teamName).join('، ')) + '</td><td class="hint">' + A.esc(u.mentorEmail || '—') + '</td><td>' + (u.canManage ? '✓' : '—') + '</td><td>' + (u.active ? '<span class="tag tag-ok">فعال</span>' : '<span class="tag tag-danger">غیرفعال</span>') + '</td><td style="white-space:nowrap"><button class="btn btn-soft btn-sm" data-edit>ویرایش</button> <button class="btn ' + (u.active ? 'btn-danger' : 'btn-ok') + ' btn-sm" data-toggle>' + (u.active ? 'غیرفعال' : 'فعال') + '</button></td></tr>').join('')
         + '</tbody></table></div></div>';
 
@@ -849,7 +865,8 @@ window.Admin = (() => {
       title: isEdit ? 'ویرایش کاربر' : 'افزودن کاربر',
       footHTML: '<button class="btn btn-soft" data-close>انصراف</button><button class="btn btn-primary" id="saveUserBtn">ذخیره</button>',
       bodyHTML: '<form id="userForm" class="form-grid">'
-        + '<div class="form-field full"><label>ایمیل سازمانی *</label><input name="email" type="email" required value="' + A.esc(user.email || '') + '" ' + (isEdit ? 'readonly' : '') + ' placeholder="name@bimebazar.com"></div>'
+        + '<div class="form-field full"><label>نام کاربری *</label><input name="email" type="text" required value="' + A.esc(user.email || '') + '" ' + (isEdit ? 'readonly' : '') + ' placeholder="username"></div>'
+        + '<div class="form-field full"><label>رمز عبور '+(isEdit?'(برای حفظ رمز فعلی خالی بگذارید)':'*')+'</label><input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" '+(isEdit?'':'required')+'></div>'
         + '<div class="form-field full"><label>نام و نام خانوادگی</label><input name="name" value="' + A.esc(user.name || '') + '" placeholder="علی رضایی"></div>'
         + '<div class="form-field"><label>نقش *</label><select name="role">'
         + [['learner', 'کارشناس'], ['admin', 'مدیر سامانه']].map(o => '<option value="' + o[0] + '"' + (user.role === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
@@ -862,7 +879,7 @@ window.Admin = (() => {
           if (!form.reportValidity()) return;
           const fd = new FormData(form);
           const payload = {
-            email: fd.get('email'), name: fd.get('name'), role: fd.get('role'),
+            email: fd.get('email'), password: fd.get('password') || '', name: fd.get('name'), role: fd.get('role'),
             teams: Array.from(form.querySelectorAll('input[name="teams"]:checked')).map(x => x.value),
             mentorEmail: '', canManage: fd.get('role') === 'admin'
           };
@@ -943,7 +960,8 @@ const App = (() => {
     theme: 'light',
     library: null,          // { teamKey, folderStack:[], page, pageTokens, nextToken, search, type, reqId }
     quiz: null,             // جلسه آزمون فعال
-    timers: []
+    timers: [],
+    sessionToken: ''
   };
 
   const $ = (sel, root) => (root || document).querySelector(sel);
@@ -961,15 +979,15 @@ const App = (() => {
   const readOnly = new Set(['getBootstrap', 'listMyPaths', 'getPath', 'getLibraryPage', 'getMyTranscript', 'listAnnouncements']);
   function callServer(fn) {
     const args = Array.prototype.slice.call(arguments, 1);
-    const key = readOnly.has(fn) ? JSON.stringify([fn, args]) : null;
+    const key = readOnly.has(fn) ? JSON.stringify([state.sessionToken, fn, args]) : null;
     if (key && pendingReads.has(key)) return pendingReads.get(key);
     let request;
     if (!isDemo()) {
       request = new Promise((resolve, reject) => {
         google.script.run
           .withSuccessHandler(resolve)
-          .withFailureHandler(err => reject(new Error((err && err.message) || String(err) || 'خطای ناشناخته در سرور')))
-          [fn].apply(null, args);
+          .withFailureHandler(err => { const message = (err && err.message) || String(err) || 'خطای ناشناخته در سرور'; if (/نشست ورود/.test(message)) showLogin(message); reject(new Error(message)); })
+          .apiRequest(state.sessionToken, fn, args);
       });
     } else {
       request = Promise.reject(new Error('اتصال به سرور Apps Script برقرار نیست. برنامه را از نشانی وب‌اپ منتشرشده باز کنید.')); 
@@ -1914,39 +1932,63 @@ const App = (() => {
 
   }
 
+  function storeSession(token) {
+    state.sessionToken = token;
+    try { if (token) sessionStorage.setItem('bba-session', token); else sessionStorage.removeItem('bba-session'); } catch (_) {}
+  }
+  function showLogin(message) {
+    storeSession(''); pendingReads.clear(); state.bootstrap = null; state.user = null; state.teams = [];
+    closeModal(); closeSidebar();
+    $('#appRoot').hidden = true; $('#loginScreen').hidden = false;
+    $('#loginPassword').value = '';
+    const e = $('#loginError'); e.hidden = !message; e.textContent = message || '';
+    $('#loginUsername').focus();
+  }
+  function loginRequest(username, password) {
+    if (isDemo()) return Promise.reject(new Error('اتصال به سرور Apps Script برقرار نیست. وب‌اپ منتشرشده را باز کنید.'));
+    return new Promise((resolve, reject) => google.script.run.withSuccessHandler(resolve).withFailureHandler(e => reject(new Error(e.message || String(e)))).login(username, password));
+  }
+  async function enterApplication() {
+    const b = await callServer('getBootstrap');
+    state.bootstrap = b; state.teams = b.teams || []; state.pageSize = b.pageSize || 12;
+    await paintChrome(b);
+    $('#loginScreen').hidden = true; $('#appRoot').hidden = false;
+    go('dashboard');
+    loadNotifications(true).catch(err => toast(err.message, 'error'));
+    if (!notificationPoll) notificationPoll = setInterval(() => { if (state.sessionToken) loadNotifications(true).catch(() => {}); }, 60000);
+  }
   async function boot() {
-    // تم: انتخاب ذخیره‌شده → ترجیح سیستم → روشن
     let saved = null;
     try { saved = localStorage.getItem('bba-theme'); } catch (e) {}
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     applyTheme(saved || (prefersDark ? 'dark' : 'light'));
-
-    // لوگو و فاوآیکون
     if (typeof BRAND !== 'undefined') {
       $('#brandMark').innerHTML = '<img src="' + BRAND.mark + '" alt="لوگوی بیمه‌بازار">';
+      $('#loginBrand').innerHTML = '<img src="' + BRAND.mark + '" alt="بیمه‌بازار">';
       let link = document.querySelector('link[rel="icon"]');
       if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
       link.type = 'image/png'; link.href = BRAND.favicon;
     }
-
     bindChrome();
-
-    // دریافت داده اولیه
-    try {
-      $('#view').innerHTML = loadingHTML('در حال اتصال به سرور…');
-      const b = await callServer('getBootstrap');
-      state.bootstrap = b;
-      state.teams = b.teams || [];
-      state.pageSize = b.pageSize || 12;
-      await paintChrome(b);
-      go('dashboard');
-      loadNotifications(true).catch(err => toast(err.message, 'error'));
-      if (!notificationPoll) notificationPoll = setInterval(() => loadNotifications(true).catch(() => {}), 60000);
-    } catch (err) {
-      $('#topTitle').textContent = 'خطا در بارگذاری';
-      $('#view').innerHTML = errorHTML(err.message, true);
-      const rb = $('#retryBtn'); if (rb) rb.addEventListener('click', () => boot());
-    }
+    $('#loginForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = $('#loginButton'), error = $('#loginError');
+      btn.disabled = true; btn.textContent = 'در حال ورود و دریافت اطلاعات…'; error.hidden = true;
+      try {
+        const r = await loginRequest($('#loginUsername').value.trim(), $('#loginPassword').value);
+        $('#loginPassword').value = ''; storeSession(r.token);
+        await enterApplication();
+      } catch (err) { showLogin(err.message); }
+      finally { btn.disabled = false; btn.textContent = 'ورود'; }
+    });
+    $('#logoutBtn').addEventListener('click', () => {
+      const token = state.sessionToken;
+      if (token && !isDemo()) google.script.run.withSuccessHandler(() => {}).withFailureHandler(() => {}).logout(token);
+      clearTimers(); closeSidebar(); showLogin('از حساب خارج شدید.');
+    });
+    let token = ''; try { token = sessionStorage.getItem('bba-session') || ''; } catch (_) {}
+    if (token) { storeSession(token); try { await enterApplication(); return; } catch (e) { showLogin('نشست قبلی معتبر نیست. دوباره وارد شوید.'); return; } }
+    showLogin();
   }
 
   // رابط عمومی برای Admin.html و رویدادهای درون‌خطی

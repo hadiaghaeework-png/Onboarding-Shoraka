@@ -22,6 +22,7 @@ const TEAM_CONFIG = [
 
 const SHEET_DEFS = {
   Users:        ['Email', 'Name', 'Role', 'Teams', 'MentorEmail', 'CanManage', 'Active', 'CreatedAt'],
+  Credentials:  ['Username', 'Salt', 'PasswordHash', 'Iterations', 'Version'],
   Paths:        ['PathId', 'TeamKey', 'Title', 'Description', 'Order', 'Active', 'CreatedAt'],
   PathItems:    ['ItemId', 'PathId', 'Order', 'Title', 'DriveItemId', 'ItemType', 'Required', 'QuizId', 'EstimatedMin', 'Active'],
   Progress:     ['Email', 'PathItemId', 'Status', 'CompletedAt', 'Score'],

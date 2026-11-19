@@ -13,7 +13,18 @@
 </head>
 <body data-theme="light">
 
-<div class="app" id="appRoot">
+<section id="loginScreen" class="login-screen" aria-label="ورود به آکادمی">
+  <form id="loginForm" class="login-card">
+    <div id="loginBrand" class="login-brand"></div>
+    <h1>ورود به آکادمی یادگیری</h1>
+    <p>نام کاربری و رمز عبور خود را وارد کنید.</p>
+    <label for="loginUsername">نام کاربری</label><input id="loginUsername" name="username" autocomplete="username" required>
+    <label for="loginPassword">رمز عبور</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+    <div id="loginError" role="alert" class="login-error" hidden></div>
+    <button class="btn btn-primary" id="loginButton" type="submit">ورود</button>
+  </form>
+</section>
+<div class="app" id="appRoot" hidden>
 
   <!-- ══════════ سایدبار ══════════ -->
   <aside id="sidebar" aria-label="ناوبری اصلی">
@@ -40,6 +51,7 @@
         <span class="tt-icon" id="themeIcon">☾</span>
         <span id="themeLabel">تغییر به حالت تاریک</span>
       </button>
+      <button class="theme-toggle" id="logoutBtn" type="button">خروج از حساب</button>
       <div class="side-foot">BimeBazar Learning Academy<br><span>© ۱۴۰۵ بیمه‌بازار — استفاده داخلی</span></div>
     </div>
   </aside>

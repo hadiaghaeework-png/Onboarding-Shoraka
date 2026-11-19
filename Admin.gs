@@ -21,7 +21,8 @@ function adminUpsertUser(payload) {
   requireRole_(user, ['admin']);
   if (!payload || !payload.email) throw new Error('ایمیل کاربر الزامی است.');
   const email = String(payload.email).toLowerCase().trim();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('ایمیل نامعتبر است.');
+  if (!/^[a-z0-9._@-]{3,100}$/.test(email)) throw new Error('نام کاربری نامعتبر است.');
+  if (payload.password && (typeof payload.password !== 'string' || payload.password.length < 12 || payload.password.length > 128)) throw new Error('رمز باید ۱۲ تا ۱۲۸ نویسه باشد.');
   if (['admin', 'learner'].indexOf(String(payload.role)) === -1) throw new Error('نقش باید مدیر یا کارشناس باشد.');
   const role = normalizeRole_(payload.role);
   if (email === user.email && role !== 'admin') throw new Error('نمی‌توانید نقش خودتان را تغییر دهید.');
@@ -38,10 +39,13 @@ function adminUpsertUser(payload) {
       sh.getRange(i + 1, 5).setValue(String(payload.mentorEmail || '').toLowerCase().trim());
       sh.getRange(i + 1, 6).setValue(!!payload.canManage);
       if (payload.active !== undefined) sh.getRange(i + 1, 7).setValue(payload.active !== false);
+      if (payload.password) savePassword_(email, payload.password);
       logActivity_(user.email, 'user_update', email);
       return ok_({ saved: email });
     }
   }
+  if (!payload.password) throw new Error('برای کاربر جدید رمز عبور الزامی است.');
+  savePassword_(email, payload.password);
   sh.appendRow([email, String(payload.name || ''), role, teams.join(','),
     String(payload.mentorEmail || '').toLowerCase().trim(), !!payload.canManage, true, nowIso_()]);
   logActivity_(user.email, 'user_create', email);

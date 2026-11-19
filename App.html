@@ -16,7 +16,8 @@ const App = (() => {
     theme: 'light',
     library: null,          // { teamKey, folderStack:[], page, pageTokens, nextToken, search, type, reqId }
     quiz: null,             // جلسه آزمون فعال
-    timers: []
+    timers: [],
+    sessionToken: ''
   };
 
   const $ = (sel, root) => (root || document).querySelector(sel);
@@ -34,15 +35,15 @@ const App = (() => {
   const readOnly = new Set(['getBootstrap', 'listMyPaths', 'getPath', 'getLibraryPage', 'getMyTranscript', 'listAnnouncements']);
   function callServer(fn) {
     const args = Array.prototype.slice.call(arguments, 1);
-    const key = readOnly.has(fn) ? JSON.stringify([fn, args]) : null;
+    const key = readOnly.has(fn) ? JSON.stringify([state.sessionToken, fn, args]) : null;
     if (key && pendingReads.has(key)) return pendingReads.get(key);
     let request;
     if (!isDemo()) {
       request = new Promise((resolve, reject) => {
         google.script.run
           .withSuccessHandler(resolve)
-          .withFailureHandler(err => reject(new Error((err && err.message) || String(err) || 'خطای ناشناخته در سرور')))
-          [fn].apply(null, args);
+          .withFailureHandler(err => { const message = (err && err.message) || String(err) || 'خطای ناشناخته در سرور'; if (/نشست ورود/.test(message)) showLogin(message); reject(new Error(message)); })
+          .apiRequest(state.sessionToken, fn, args);
       });
     } else {
       request = Promise.reject(new Error('اتصال به سرور Apps Script برقرار نیست. برنامه را از نشانی وب‌اپ منتشرشده باز کنید.')); 
@@ -987,39 +988,63 @@ const App = (() => {
 
   }
 
+  function storeSession(token) {
+    state.sessionToken = token;
+    try { if (token) sessionStorage.setItem('bba-session', token); else sessionStorage.removeItem('bba-session'); } catch (_) {}
+  }
+  function showLogin(message) {
+    storeSession(''); pendingReads.clear(); state.bootstrap = null; state.user = null; state.teams = [];
+    closeModal(); closeSidebar();
+    $('#appRoot').hidden = true; $('#loginScreen').hidden = false;
+    $('#loginPassword').value = '';
+    const e = $('#loginError'); e.hidden = !message; e.textContent = message || '';
+    $('#loginUsername').focus();
+  }
+  function loginRequest(username, password) {
+    if (isDemo()) return Promise.reject(new Error('اتصال به سرور Apps Script برقرار نیست. وب‌اپ منتشرشده را باز کنید.'));
+    return new Promise((resolve, reject) => google.script.run.withSuccessHandler(resolve).withFailureHandler(e => reject(new Error(e.message || String(e)))).login(username, password));
+  }
+  async function enterApplication() {
+    const b = await callServer('getBootstrap');
+    state.bootstrap = b; state.teams = b.teams || []; state.pageSize = b.pageSize || 12;
+    await paintChrome(b);
+    $('#loginScreen').hidden = true; $('#appRoot').hidden = false;
+    go('dashboard');
+    loadNotifications(true).catch(err => toast(err.message, 'error'));
+    if (!notificationPoll) notificationPoll = setInterval(() => { if (state.sessionToken) loadNotifications(true).catch(() => {}); }, 60000);
+  }
   async function boot() {
-    // تم: انتخاب ذخیره‌شده → ترجیح سیستم → روشن
     let saved = null;
     try { saved = localStorage.getItem('bba-theme'); } catch (e) {}
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     applyTheme(saved || (prefersDark ? 'dark' : 'light'));
-
-    // لوگو و فاوآیکون
     if (typeof BRAND !== 'undefined') {
       $('#brandMark').innerHTML = '<img src="' + BRAND.mark + '" alt="لوگوی بیمه‌بازار">';
+      $('#loginBrand').innerHTML = '<img src="' + BRAND.mark + '" alt="بیمه‌بازار">';
       let link = document.querySelector('link[rel="icon"]');
       if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
       link.type = 'image/png'; link.href = BRAND.favicon;
     }
-
     bindChrome();
-
-    // دریافت داده اولیه
-    try {
-      $('#view').innerHTML = loadingHTML('در حال اتصال به سرور…');
-      const b = await callServer('getBootstrap');
-      state.bootstrap = b;
-      state.teams = b.teams || [];
-      state.pageSize = b.pageSize || 12;
-      await paintChrome(b);
-      go('dashboard');
-      loadNotifications(true).catch(err => toast(err.message, 'error'));
-      if (!notificationPoll) notificationPoll = setInterval(() => loadNotifications(true).catch(() => {}), 60000);
-    } catch (err) {
-      $('#topTitle').textContent = 'خطا در بارگذاری';
-      $('#view').innerHTML = errorHTML(err.message, true);
-      const rb = $('#retryBtn'); if (rb) rb.addEventListener('click', () => boot());
-    }
+    $('#loginForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = $('#loginButton'), error = $('#loginError');
+      btn.disabled = true; btn.textContent = 'در حال ورود و دریافت اطلاعات…'; error.hidden = true;
+      try {
+        const r = await loginRequest($('#loginUsername').value.trim(), $('#loginPassword').value);
+        $('#loginPassword').value = ''; storeSession(r.token);
+        await enterApplication();
+      } catch (err) { showLogin(err.message); }
+      finally { btn.disabled = false; btn.textContent = 'ورود'; }
+    });
+    $('#logoutBtn').addEventListener('click', () => {
+      const token = state.sessionToken;
+      if (token && !isDemo()) google.script.run.withSuccessHandler(() => {}).withFailureHandler(() => {}).logout(token);
+      clearTimers(); closeSidebar(); showLogin('از حساب خارج شدید.');
+    });
+    let token = ''; try { token = sessionStorage.getItem('bba-session') || ''; } catch (_) {}
+    if (token) { storeSession(token); try { await enterApplication(); return; } catch (e) { showLogin('نشست قبلی معتبر نیست. دوباره وارد شوید.'); return; } }
+    showLogin();
   }
 
   // رابط عمومی برای Admin.html و رویدادهای درون‌خطی
