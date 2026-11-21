@@ -2154,7 +2154,8 @@ function adminImportQuestions(quizId, filename, encoded) {
   table.slice(1).forEach((r,i) => {
     const vals = headers.map((_,j)=>String(r[j] || '').trim());
     if (vals.some(x=>x.length>4000 || /^\s*=/.test(x))) throw new Error('ردیف '+(i+2)+': مقدار بسیار طولانی یا فرمول مجاز نیست.');
-    const answer = Number(vals[6]);
+    const answer = Number(vals[6].replace(/[۰-۹٠-٩]/g, c => String(c.charCodeAt(0) - (c >= '۰' && c <= '۹' ? 1776 : 1632))));
+    vals[6] = String(answer);
     if (!vals[0] || !vals[1] || vals.slice(2,6).some(x=>!x) || !Number.isInteger(answer) || answer < 1 || answer > 4 || !vals[7] || !vals[8] || !vals[9]) throw new Error('ردیف '+(i+2)+': همه فیلدها و پاسخ بین ۱ تا ۴ الزامی است.');
     const key = vals[1].replace(/\s+/g,' ').toLowerCase();
     if (seen[key]) throw new Error('ردیف '+(i+2)+': سؤال تکراری است.');

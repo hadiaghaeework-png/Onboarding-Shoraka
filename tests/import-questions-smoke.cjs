@@ -6,4 +6,10 @@ const ctx={Drive:{Files:{get:()=>({mimeType:'application/pdf',trashed:false})}},
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('Admin.gs','utf8'),ctx);ctx.getQuizRow_=()=>({QuizId:'q',RefType:'drive',RefId:'file123',TeamKey:'team'});ctx.assertQuizManageScope_=()=>{};ctx.ensureQuestionMetadata_=()=>sheet;
 assert.equal(ctx.adminImportQuestions('q','questions.csv','aGk=').count,10);assert.equal(saved.length,10);assert.equal(saved[0][6],'[1]');assert.equal(saved[0][9],'why');
 table[2][1]=table[1][1];assert.throws(()=>ctx.adminImportQuestions('q','questions.csv','aGk='),/تکراری/);table[2][1]='Question 1';existing=[{}];assert.throws(()=>ctx.adminImportQuestions('q','questions.csv','aGk='),/بدون سؤال/);existing=[];table[2][0]='other';assert.throws(()=>ctx.adminImportQuestions('q','questions.csv','aGk='),/شناسه/);user.role='learner';assert.throws(()=>ctx.adminImportQuestions('q','questions.csv','aGk='),/denied/);
-console.log('Question import validation and authorization passed (mocked GAS).');
+user.role='admin';table[2][0]='file123';table[1][6]='۲';assert.equal(ctx.adminImportQuestions('q','questions.csv','aGk=').count,10);assert.equal(saved[0][6],'[1]');
+let removed=[];
+ctx.Drive.Files.create=()=>({id:'temporary'});ctx.Drive.Files.remove=id=>removed.push(id);
+ctx.SpreadsheetApp={openById:()=>({getSheets:()=>[{getLastRow:()=>table.length,getLastColumn:()=>10,getDataRange:()=>({getDisplayValues:()=>table})}]})};
+assert.equal(ctx.adminImportQuestions('q','questions.xlsx','aGk=').count,10);assert.equal(removed[0],'temporary');
+table[1][1]='';assert.throws(()=>ctx.adminImportQuestions('q','questions.xlsx','aGk='),/الزامی/);assert.equal(removed.length,2);
+console.log('Question XLSX/CSV import, validation, cleanup, and authorization passed (mocked GAS).');
